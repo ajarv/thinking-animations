@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paper Life — Dense Thought Network</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/paper.js/0.12.17/paper-full.min.js"></script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div id="veil"></div>
+<div id="hud">
+  <div class="row">
+    <span class="label">Knowledge saturation</span>
+    <span class="val" id="kVal">0%</span>
+  </div>
+  <div class="bar"><div class="fill" id="kFill"></div></div>
+  <div class="row">
+    <span class="label">Age</span>
+    <span class="val" id="aVal">0 yrs</span>
+  </div>
+  <div class="bar" id="aBar"><div class="fill" id="aFill"></div></div>
+  <div id="stageName">Early childhood</div>
+  <div class="row">
+    <span class="label">Sleep need</span>
+    <span class="val small" id="stateVal">Awake</span>
+  </div>
+  <div class="bar thin"><div class="fill" id="needFill"></div></div>
+  <div id="clusterInfo"></div>
+  <div id="waveNote"></div>
+  <div class="legend">
+    <span><i style="background:#c62828"></i>Danger</span>
+    <span><i style="background:#c2185b"></i>Attraction</span>
+    <span><i style="background:#ef9a9a"></i>Everyday</span>
+    <span><i style="background:#1d6fe3"></i>Counter</span>
+    <span><i style="background:#ff9800"></i>Homed</span>
+    <span><i style="background:#81c784;box-shadow:0 0 0 1px #43a047 inset"></i>Settled</span>
+  </div>
+  <div class="control lust-control">
+    <div class="row">
+      <span class="label">Lust for learning</span>
+      <span class="val" id="lustVal">100</span>
+    </div>
+    <input id="lust" type="range" min="0" max="100" step="1" value="100" aria-label="Lust for learning">
+    <div class="lust-ends"><span>Meditation</span><span>Eager</span></div>
+  </div>
+</div>
+<script src="js/config.js"></script>
+<script src="js/util.js"></script>
+<script src="js/network.js"></script>
+<script src="js/simulation.js"></script>
+<script src="js/renderer.js"></script>
+<script src="js/hud.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

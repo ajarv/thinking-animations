@@ -1,0 +1,155 @@
+(function (root) {
+  'use strict';
+  const PL = root.PaperLife = root.PaperLife || {};
+
+  const LUT_STEPS = 20;
+
+  function cubic(p0, p1, p2, p3, u) {
+    const v = 1 - u;
+    const a = v * v * v;
+    const b = 3 * v * v * u;
+    const c = 3 * v * u * u;
+    const d = u * u * u;
+    return {
+      x: a * p0.x + b * p1.x + c * p2.x + d * p3.x,
+      y: a * p0.y + b * p1.y + c * p2.y + d * p3.y
+    };
+  }
+
+  // All geometry lives in grid space: one unit is one neuron cell. The
+  // renderer scales grid space to pixels, so the model is viewport-independent.
+  PL.createNetwork = function (config) {
+    const U = PL.util;
+    const cols = config.cols;
+    const rows = config.rows;
+    const random = U.mulberry32(23);
+    const neurons = [];
+
+    for (let col = 0; col < cols; col++) {
+      for (let row = 0; row < rows; row++) {
+        neurons.push({
+          id: neurons.length,
+          col: col,
+          row: row,
+          x: col + 0.5 + (random() - 0.5) * 0.36,
+          y: row + 0.5 + (random() - 0.5) * 0.48,
+          angle: (random() - 0.5) * 0.42,
+          dendriteSeed: random() * Math.PI * 2,
+          incoming: [],
+          outgoing: [],
+          adjacent: [],
+          strength: 0,
+          pending: 0,
+          category: -1
+        });
+      }
+    }
+
+    function nodeAt(col, row) {
+      return neurons[U.clamp(col, 0, cols - 1) * rows + U.clamp(row, 0, rows - 1)];
+    }
+
+    function shape(edge) {
+      const p0 = { x: edge.from.x, y: edge.from.y };
+      const p3 = { x: edge.to.x, y: edge.to.y };
+      const dx = p3.x - p0.x;
+      const dy = p3.y - p0.y;
+      const span = Math.hypot(dx, dy) || 1;
+      const bx = -dy / span * edge.bend;
+      const by = dx / span * edge.bend;
+      const p1 = { x: p0.x + dx * 0.31 + bx, y: p0.y + dy * 0.31 + by };
+      const p2 = { x: p0.x + dx * 0.69 - bx * 0.55, y: p0.y + dy * 0.69 - by * 0.55 };
+      const lut = [];
+      let distance = 0;
+      let previous = p0;
+      for (let i = 0; i <= LUT_STEPS; i++) {
+        const point = cubic(p0, p1, p2, p3, i / LUT_STEPS);
+        distance += Math.hypot(point.x - previous.x, point.y - previous.y);
+        lut.push({ x: point.x, y: point.y, s: distance });
+        previous = point;
+      }
+      edge.p0 = p0;
+      edge.p1 = p1;
+      edge.p2 = p2;
+      edge.p3 = p3;
+      edge.lut = lut;
+      edge.length = Math.max(0.0001, distance);
+    }
+
+    const edges = [];
+    const keys = {};
+
+    function addEdge(from, to) {
+      const key = from.id + ':' + to.id;
+      if (from === to || keys[key]) return;
+      keys[key] = true;
+      const edge = {
+        id: edges.length,
+        from: from,
+        to: to,
+        bend: (U.hash(from.id, to.id) - 0.5) * 0.72,
+        seedAt: -1,
+        strength: 0,
+        traversals: 0
+      };
+      shape(edge);
+      edges.push(edge);
+      from.outgoing.push(edge);
+      to.incoming.push(edge);
+      from.adjacent.push(edge);
+      to.adjacent.push(edge);
+    }
+
+    // Horizontal lanes plus alternating diagonals, then vertical links so
+    // thoughts can enter from any border. Every axon is walkable both ways.
+    for (let col = 0; col < cols - 1; col++) {
+      for (let row = 0; row < rows; row++) {
+        const from = nodeAt(col, row);
+        addEdge(from, nodeAt(col + 1, row));
+        addEdge(from, nodeAt(col + 1, row + ((col + row) % 2 === 0 ? 1 : -1)));
+      }
+    }
+    for (let col = 0; col < cols; col++) {
+      for (let row = 0; row < rows - 1; row++) {
+        addEdge(nodeAt(col, row), nodeAt(col, row + 1));
+      }
+    }
+
+    const anchors = [];
+    const grid = config.categories;
+    for (let r = 0; r < grid.rows; r++) {
+      for (let c = 0; c < grid.cols; c++) {
+        const neuron = nodeAt(
+          Math.round((c + 0.5) / grid.cols * cols - 0.5),
+          Math.round((r + 0.5) / grid.rows * rows - 0.5)
+        );
+        neuron.category = anchors.length;
+        anchors.push(neuron);
+      }
+    }
+
+    function pointOnEdge(edge, t) {
+      const target = U.clamp(t, 0, 1) * edge.length;
+      const lut = edge.lut;
+      let i = 1;
+      while (i < lut.length - 1 && lut[i].s < target) i++;
+      const a = lut[i - 1];
+      const b = lut[i];
+      const f = U.clamp((target - a.s) / ((b.s - a.s) || 1), 0, 1);
+      return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
+    }
+
+    return {
+      cols: cols,
+      rows: rows,
+      neurons: neurons,
+      edges: edges,
+      anchors: anchors,
+      nodeAt: nodeAt,
+      pointOnEdge: pointOnEdge,
+      totalLength: edges.reduce(function (sum, edge) {
+        return sum + edge.length;
+      }, 0)
+    };
+  };
+})(typeof window !== 'undefined' ? window : globalThis);

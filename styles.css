@@ -1,0 +1,206 @@
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #e9f4fc;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+}
+
+#hud {
+  position: fixed;
+  top: 18px;
+  left: 18px;
+  width: 268px;
+  padding: 14px 16px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 6px 24px rgba(40, 80, 140, 0.12);
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+  color: #1d3866;
+  user-select: none;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.label {
+  text-transform: uppercase;
+  font-weight: 600;
+  opacity: 0.72;
+}
+
+.val {
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.bar {
+  position: relative;
+  height: 10px;
+  margin-bottom: 14px;
+  overflow: hidden;
+  border-radius: 5px;
+  background: rgba(29, 56, 102, 0.1);
+}
+
+.fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  border-radius: 5px;
+}
+
+#kFill {
+  background-color: #22407e;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.22) 0 6px,
+    rgba(255, 255, 255, 0) 6px 12px
+  );
+  background-size: 17px 17px;
+  animation: crawl 0.9s linear infinite;
+}
+
+#aFill {
+  background: linear-gradient(90deg, #7fb6e8, #3d6fb6);
+}
+
+.val.small {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.bar.thin {
+  height: 6px;
+  margin-bottom: 8px;
+}
+
+#needFill {
+  background: linear-gradient(90deg, #f3b3b3, #d84343);
+  transition: background 0.6s linear;
+}
+
+#needFill.rem {
+  background: linear-gradient(90deg, #d5d5da, #8d8d98);
+}
+
+#needFill.deep {
+  background: linear-gradient(90deg, #cfe8d4, #5ea36a);
+}
+
+#needFill.waking {
+  background: linear-gradient(90deg, #c5dff5, #6aa0d4);
+}
+
+.tick {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+#stageName {
+  margin-top: -6px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+#waveNote {
+  min-height: 1.05em;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+#waveNote.reward { color: #a15b2a; }
+#waveNote.stress { color: #7a3060; }
+#waveNote.both { color: #6d4a58; }
+
+#clusterInfo {
+  margin-bottom: 10px;
+  font-size: 11px;
+  opacity: 0.72;
+  font-variant-numeric: tabular-nums;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-bottom: 6px;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.legend i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.control {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.lust-control {
+  display: block;
+}
+
+#lust {
+  width: 100%;
+  margin: 4px 0 2px;
+  accent-color: #22407e;
+}
+
+.lust-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  font-weight: 650;
+  opacity: 0.7;
+}
+
+#veil {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: #e9f4fc;
+  opacity: 0;
+}
+
+#diag {
+  display: none;
+}
+
+@keyframes crawl {
+  from { background-position: 0 0; }
+  to { background-position: 17px 0; }
+}
