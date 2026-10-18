@@ -400,32 +400,44 @@
       });
     }
 
+    // Last frame's crowd. Many overlapping bursts share one opacity cap so
+    // the field stays readable; every category is still drawn.
+    let counterCrowd = 1;
+
     function drawCounters() {
-      sim.counters.forEach(function (c, i) {
+      let live = 0;
+      const counters = sim.counters;
+      for (let i = 0; i < counters.length; i++) {
+        const c = counters[i];
         const cv = counterViews[i];
         if (!c.active) {
-          cv.halo.visible = false;
-          cv.bead.visible = false;
-          return;
+          if (cv.halo.visible) {
+            cv.halo.visible = false;
+            cv.bead.visible = false;
+          }
+          continue;
         }
+        live++;
         const u = c.ttl > 0 ? c.age / c.ttl : 1;
         const fade = Math.max(0, 1 - Math.max(0, u - 0.62) / 0.38);
         const radius = thoughtRadius * sim.counterVisualSize(c);
-        const x = c.x * sx;
-        const y = c.y * sy;
         if (radius < 0.04) {
           cv.halo.visible = false;
           cv.bead.visible = false;
-          return;
+          continue;
         }
+        const x = c.x * sx;
+        const y = c.y * sy;
+        const beadOpacity = 0.94 * fade * (0.42 + 0.58 * counterCrowd);
         cv.halo.visible = true;
         place(cv.halo, x, y, radius * 3.4);
-        cv.halo.opacity = 0.16 * fade;
+        cv.halo.opacity = 0.16 * fade * counterCrowd;
         cv.bead.visible = true;
         place(cv.bead, x, y, radius);
         cv.bead.strokeWidth = 0.28;
-        cv.bead.opacity = 0.94 * fade;
-      });
+        cv.bead.opacity = beadOpacity;
+      }
+      counterCrowd = live > 72 ? 72 / live : 1;
     }
 
     // Temporary and traveling thoughts are drawn at crystalScale (2×). A

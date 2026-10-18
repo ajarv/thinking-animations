@@ -9,7 +9,10 @@
 
     pools: {
       thoughts: 144,
-      counters: 233,
+      // Acceptance bursts are 7 and home ticks are at most 3. Measured peak
+      // over 400s and two nights is 362 live, with zero drops. 610 is the
+      // next Fibonacci size with room for another burst at that peak.
+      counters: 610,
       crystals: 377
     },
 
@@ -43,19 +46,27 @@
     crystalScale: 2,
     // Accepted thoughts enter large, shrink toward insignificance, and fade.
     // A temporary home ignores this curve and is drawn at crystalScale.
-    entryScale: 2.2,
+    entryScale: 3.4,
     fadeScale: 0.15,
     shrinkPower: 1.35,
     rejectTtlMin: 0.22,
     rejectTtlMax: 0.38,
 
-    // An unsettled thought (temporary or traveling) provokes one internal
-    // thought on its own schedule. Settled thoughts never do.
+    // An accepted thought fires 7 internal thoughts once, from hash-picked
+    // centers. A temporary or wandering home fires 1–3 more on each tick of
+    // its own 3–6s timer, until it settles or sleep tosses it.
     internal: {
-      intervalMin: 2.5,
-      intervalMax: 5.5,
-      sleepScale: 0.72,
-      // Visible size falls as initialScale * (1 − age/ttl) ^ shrinkPower.
+      acceptCount: 7,
+      homeMax: 3,
+      intervalMin: 3,
+      intervalMax: 6,
+      // Visual sizes, same units as kind size × scale. Mixed inside a burst.
+      sizes: { medium: 1.15, large: 2.1, xlarge: 3.4 },
+      // Awake lifetime. Sleep stretches it; age shortens it. The shrink
+      // curve is still initialScale * (1 − age/ttl) ^ shrinkPower.
+      ttlMin: 2.6,
+      ttlMax: 4.2,
+      sleepTtl: 1.35,
       shrinkPower: 1.2
     },
 

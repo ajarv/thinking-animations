@@ -65,9 +65,12 @@
     const counters = pool(config.pools.counters, function (id) {
       return {
         id: id, active: false, x: 0, y: 0, vx: 0, vy: 0,
-        age: 0, ttl: 1, sourceId: -1, initialScale: 1
+        age: 0, ttl: 1, sourceId: -1, sourceCategory: -1,
+        triggerId: -1, triggerKind: '', burstId: -1, sizeClass: 0, initialScale: 1
       };
     });
+    const freeCounters = new Array(counters.length);
+    let freeTop = 0;
 
     // A crystal is an external thought that found a temporary home. It turns
     // orange and doubles in size ("temporary"); during sleep it detaches and
@@ -125,6 +128,17 @@
     }
 
     const s = {};
+    const INTERNAL = config.internal;
+    const SIZE_CLASSES = [INTERNAL.sizes.medium, INTERNAL.sizes.large, INTERNAL.sizes.xlarge];
+    const SIZE_NAMES = ['medium', 'large', 'xlarge'];
+    const centerOrder = new Array(CATEGORY_COUNT);
+    const latestBurst = {
+      burstId: -1,
+      triggerId: -1,
+      triggerKind: '',
+      sourceCategories: [],
+      sizeClasses: []
+    };
     let centers = [];
     let asleep = false;
     const STAGES = config.stages;
@@ -200,7 +214,7 @@
     // Dimensionless bead size, before the renderer's pixel scale. External
     // thoughts use kind size times their shrinking travel scale. An orange
     // temporary or wandering home is exactly 2× its kind. An internal thought
-    // stores that number at birth and shrinks it to zero over its own life.
+    // draws medium, large, or xlarge at birth and shrinks that to zero.
     function thoughtVisualSize(p) {
       return KINDS[p.kind].size * thoughtScale(p.age, p.ttl, p.rejected);
     }
@@ -306,8 +320,8 @@
       }
     }
 
-    // Any neuron can temporarily house a thought. Thickness only biases
-    // which neurons answer an arrival with an internal thought.
+    // Any neuron can temporarily house a thought. Internal responses do not
+    // come from these hosts; they fan out from the 21 category anchors.
     function hostCenters() {
       return neurons;
     }
@@ -429,6 +443,22 @@
       p.edge = null;
     }
 
+    function deactivateCounter(c) {
+      if (!c.active) return;
+      c.active = false;
+      freeCounters[freeTop++] = c;
+      s.activeCounterCount--;
+    }
+
+    function rebuildFreeCounters() {
+      freeTop = 0;
+      s.activeCounterCount = 0;
+      for (let i = 0; i < counters.length; i++) {
+        counters[i].active = false;
+        freeCounters[freeTop++] = counters[i];
+      }
+    }
+
     function completeJourney(p) {
       s.completedJourneys++;
       s.journeyTime += s.time - p.bornAt;
@@ -493,7 +523,7 @@
       p.active = true;
       enterEdge(p, first);
       placeThought(p);
-      if (hash(serial, 23.9) < housingChance()) emitCounters(p, serial);
+      if (p.housingRoll < housingChance()) emitAcceptanceBurst(p);
     }
 
     function stepThoughts(dt) {
@@ -544,140 +574,127 @@
 
     // ---------- Internal counter-thoughts ----------
 
-    function emitCounter(neuron, serial, index, visualSize) {
-      const c = takeFree(counters);
-      if (!c || !neuron) return false;
-      const ageRatio = s.age / LIFE.maxAge;
-      const angle = hash(serial * 2.17, index * 5.91 + 0.3) * Math.PI * 2;
-      const speed = lerp(48, 155, hash(serial, index + 11.4)) / 72 * (asleep ? 1.25 : 1);
-      c.active = true;
-      c.x = neuron.x;
-      c.y = neuron.y;
-      c.vx = Math.cos(angle) * speed;
-      c.vy = Math.sin(angle) * speed;
-      c.age = 0;
-      c.ttl = (lerp(7.2, 1.15, ageRatio) +
-        hash(serial * 1.7, index * 3.1 + 0.4) * lerp(1.8, 0.65, ageRatio)) *
-        (asleep ? 1.8 : 1);
-      c.sourceId = neuron.id;
-      c.initialScale = visualSize > 0 ? visualSize : 1;
-      s.countersEmitted++;
-      return true;
-    }
-
-    // Each unsettled crystal has its own cadence, staggered by identity so a
-    // full pool does not fire on the same frame. Sleep shortens the wait but
-    // does not create thoughts on its own.
-    function internalInterval(c) {
-      const span = config.internal.intervalMax - config.internal.intervalMin;
-      const base = config.internal.intervalMin + hash(c.id, 2.8) * span;
-      return asleep ? base * config.internal.sleepScale : base;
-    }
-
+    // Each temporary or wandering home repeats on its own hashed 3–6s gap,
+    // so a crowd of homes does not pulse together.
     function scheduleInternal(c) {
-      const every = internalInterval(c);
+      const span = INTERNAL.intervalMax - INTERNAL.intervalMin;
+      const every = INTERNAL.intervalMin + hash(c.id + 4096, c.bornAt + 2.8) * span;
       c.internalEvery = every;
       c.nextInternal = s.time + every;
       s.intervalMinSeen = Math.min(s.intervalMinSeen, every);
       s.intervalMaxSeen = Math.max(s.intervalMaxSeen, every);
     }
 
-    function permanentAnchors() {
-      const seen = {};
-      const list = [];
-      crystals.forEach(function (c) {
-        if (!c.active || c.state !== 'settled' || c.category < 0 || seen[c.category]) return;
-        seen[c.category] = true;
-        list.push(anchors[c.category]);
-      });
-      return list;
-    }
-
-    function siteNeuron(c) {
-      if (c.state === 'temporary' && c.site) return c.site;
-      let best = null;
-      let bestD = Infinity;
-      for (let i = 0; i < neurons.length; i++) {
-        const neuron = neurons[i];
-        const d = (neuron.x - c.x) * (neuron.x - c.x) + (neuron.y - c.y) * (neuron.y - c.y);
-        if (d < bestD) {
-          bestD = d;
-          best = neuron;
-        }
-      }
-      return best;
-    }
-
-    // One internal thought per unsettled crystal per interval. It leaves
-    // either the crystal's own site or, about half the time, a cluster that
-    // already has a permanent member.
-    function emitFromUnsettled(c) {
-      const homes = permanentAnchors();
-      const useHome = homes.length > 0 && hash(c.id * 9.3, s.time * 3.1 + c.id) >= 0.5;
-      const neuron = useHome
-        ? homes[Math.floor(hash(c.id, s.time + 2.2) * homes.length)]
-        : siteNeuron(c);
-      if (!emitCounter(neuron, c.id * 17 + s.internalFromUnsettled, 1, crystalVisualSize(c))) return;
-      s.internalFromUnsettled++;
-      if (useHome) s.fromPermanent++;
-      else s.fromTemporary++;
-    }
-
-    function stepUnsettledEmissions() {
-      crystals.forEach(function (c) {
-        if (!c.active || c.state === 'settled' || c.state === 'tossed') return;
-        if (s.time < c.nextInternal) return;
-        emitFromUnsettled(c);
-        scheduleInternal(c);
-      });
-    }
-
-    function emitCounters(trigger, serial) {
-      const hosts = hostCenters();
-      if (!hosts.length || !trigger) return;
-      const visualSize = thoughtVisualSize(trigger);
-      const spread = asleep ? 3 : Math.min(3, hosts.length);
-      const count = Math.min(
-        hosts.length,
-        (asleep ? 2 : 1) + Math.floor(hash(serial, 17.2) * spread)
-      );
-      const candidates = hosts.slice();
+    // Hash-picked distinct centers: a partial Fisher-Yates over a reused
+    // index array, so no allocation per burst.
+    function pickCenters(salt, count) {
+      for (let i = 0; i < CATEGORY_COUNT; i++) centerOrder[i] = i;
       for (let i = 0; i < count; i++) {
-        let total = 0;
-        const weights = candidates.map(function (neuron) {
-          const weight = 0.15 + neuron.strength;
-          total += weight;
-          return weight;
-        });
-        let choice = hash(serial * 1.9 + i * 4.7, 8.2) * total;
-        let index = candidates.length - 1;
-        for (let j = 0; j < candidates.length; j++) {
-          choice -= weights[j];
-          if (choice <= 0) {
-            index = j;
-            break;
-          }
+        const j = i + Math.floor(hash(salt * 1.31 + i, 57.3) * (CATEGORY_COUNT - i));
+        const swap = centerOrder[i];
+        centerOrder[i] = centerOrder[j];
+        centerOrder[j] = swap;
+      }
+    }
+
+    function sizeClassFor(salt, index) {
+      const roll = hash(salt * 0.73 + index * 1.91, 33.1);
+      if (roll < 1 / 3) return 0;
+      if (roll < 2 / 3) return 1;
+      return 2;
+    }
+
+    // `count` distinct centers, all or nothing. A short pool drops the whole
+    // burst rather than answer from fewer centers than intended.
+    function emitBurst(triggerId, triggerKind, salt, count) {
+      if (freeTop < count || count > CATEGORY_COUNT) {
+        s.droppedInternalBursts++;
+        return false;
+      }
+      const burstId = s.nextBurstId++;
+      const ageRatio = s.age / LIFE.maxAge;
+      pickCenters(salt + burstId * 0.37, count);
+      s.internalBursts++;
+      latestBurst.burstId = burstId;
+      latestBurst.triggerId = triggerId;
+      latestBurst.triggerKind = triggerKind;
+      latestBurst.sourceCategories.length = 0;
+      latestBurst.sizeClasses.length = 0;
+      for (let k = 0; k < count; k++) {
+        const cat = centerOrder[k];
+        const neuron = anchors[cat];
+        const c = freeCounters[--freeTop];
+        const sizeClass = sizeClassFor(salt + burstId, k);
+        const angle = hash(salt * 2.17 + cat, burstId * 0.17 + 0.3) * Math.PI * 2;
+        const speed = lerp(48, 155, hash(salt, cat + 11.4)) / 72 * (asleep ? 1.25 : 1);
+        c.active = true;
+        c.x = neuron.x;
+        c.y = neuron.y;
+        c.vx = Math.cos(angle) * speed;
+        c.vy = Math.sin(angle) * speed;
+        c.age = 0;
+        c.ttl = lerp(INTERNAL.ttlMin, INTERNAL.ttlMax, hash(salt, cat * 3.1 + 0.4)) *
+          lerp(1, 0.72, ageRatio) * (asleep ? INTERNAL.sleepTtl : 1);
+        c.sourceId = neuron.id;
+        c.sourceCategory = cat;
+        c.triggerId = triggerId;
+        c.triggerKind = triggerKind;
+        c.burstId = burstId;
+        c.sizeClass = sizeClass;
+        c.initialScale = SIZE_CLASSES[sizeClass];
+        latestBurst.sourceCategories.push(cat);
+        latestBurst.sizeClasses.push(SIZE_NAMES[sizeClass]);
+        s.sizeClassCounts[sizeClass]++;
+        s.internalParticles++;
+        s.countersEmitted++;
+      }
+      s.activeCounterCount += count;
+      if (s.activeCounterCount > s.peakActiveCounters) {
+        s.peakActiveCounters = s.activeCounterCount;
+      }
+      return true;
+    }
+
+    // Once, at acceptance: seven distinct centers answer the new thought.
+    function emitAcceptanceBurst(p) {
+      if (emitBurst(p.id, 'thought', p.id * 17 + p.bornAt, INTERNAL.acceptCount)) {
+        s.acceptanceBursts++;
+      }
+    }
+
+    // Each tick of a temporary or wandering home: one to three distinct
+    // centers, any of the 21.
+    function stepInternalEmissions() {
+      for (let i = 0; i < crystals.length; i++) {
+        const c = crystals[i];
+        if (!c.active || (c.state !== 'temporary' && c.state !== 'wandering')) continue;
+        if (s.time < c.nextInternal) continue;
+        const salt = c.id * 17 + c.bornAt + s.internalBursts;
+        const count = 1 + Math.floor(hash(salt, 71.9) * INTERNAL.homeMax);
+        if (emitBurst(c.id, 'crystal', salt, Math.min(count, INTERNAL.homeMax))) {
+          s.homeBursts++;
         }
-        emitCounter(candidates[index], serial, i, visualSize);
-        candidates.splice(index, 1);
+        c.nextInternal = s.time + c.internalEvery;
       }
     }
 
     function stepCounters(dt) {
-      const margin = 0.15;
-      counters.forEach(function (c) {
-        if (!c.active) return;
+      const margin = 0.2;
+      for (let i = 0; i < counters.length; i++) {
+        const c = counters[i];
+        if (!c.active) continue;
         c.age += dt;
+        if (c.age >= c.ttl) {
+          deactivateCounter(c);
+          continue;
+        }
         c.x += c.vx * dt;
         c.y += c.vy * dt;
-        if (
-          c.age >= c.ttl ||
-          c.x < -margin || c.y < -margin ||
-          c.x > COLS + margin || c.y > ROWS + margin
-        ) {
-          c.active = false;
-        }
-      });
+        if (c.x < margin) { c.x = margin; c.vx = Math.abs(c.vx); }
+        else if (c.x > COLS - margin) { c.x = COLS - margin; c.vx = -Math.abs(c.vx); }
+        if (c.y < margin) { c.y = margin; c.vy = Math.abs(c.vy); }
+        else if (c.y > ROWS - margin) { c.y = ROWS - margin; c.vy = -Math.abs(c.vy); }
+      }
     }
 
     // ---------- Crystallization ----------
@@ -762,7 +779,7 @@
 
     function crystallizePair(p, counter, neuron) {
       hideThought(p);
-      counter.active = false;
+      deactivateCounter(counter);
       s.crystallizations++;
       s.homed[p.kind]++;
       const c = takeCrystal();
@@ -1153,14 +1170,16 @@
       const heading = Math.atan2(anchor.y - origin.y, anchor.x - origin.x) +
         (hash(c.id * 1.3, s.time * 0.7 + category) - 0.5) * 1.6;
       const speed = travelSpeed(c);
+      const wasSettled = c.state === 'settled';
       const keepSchedule = c.state === 'temporary' && c.nextInternal > s.time;
-      if (c.state === 'settled') {
+      if (wasSettled) {
         c.judged = true;
         c.kept = true;
       }
       c.state = 'wandering';
       c.category = category;
-      if (!keepSchedule) scheduleInternal(c);
+      if (wasSettled) c.nextInternal = Infinity;
+      else if (!keepSchedule) scheduleInternal(c);
       c.x = origin.x;
       c.y = origin.y;
       c.vx = Math.cos(heading) * speed;
@@ -1379,9 +1398,15 @@
         faded: 0,
         filtered: 0,
         countersEmitted: 0,
-        internalFromUnsettled: 0,
-        fromTemporary: 0,
-        fromPermanent: 0,
+        internalBursts: 0,
+        acceptanceBursts: 0,
+        homeBursts: 0,
+        sizeClassCounts: [0, 0, 0],
+        internalParticles: 0,
+        droppedInternalBursts: 0,
+        peakActiveCounters: 0,
+        nextBurstId: 1,
+        activeCounterCount: 0,
         intervalMinSeen: Infinity,
         intervalMaxSeen: 0,
         completedJourneys: 0,
@@ -1448,9 +1473,12 @@
       knowledgeDirty = true;
       initDomains();
       thoughts.forEach(hideThought);
-      counters.forEach(function (c) {
-        c.active = false;
-      });
+      rebuildFreeCounters();
+      latestBurst.burstId = -1;
+      latestBurst.triggerId = -1;
+      latestBurst.triggerKind = '';
+      latestBurst.sourceCategories.length = 0;
+      latestBurst.sizeClasses.length = 0;
       crystals.forEach(function (c) {
         c.active = false;
         c.state = 'temporary';
@@ -1613,7 +1641,7 @@
       resolveCrystals();
       stepWaves(dt);
       stepCrystals(dt);
-      stepUnsettledEmissions();
+      stepInternalEmissions();
       refreshKnowledge();
       stepLust(dt);
       updateSleepState(dt);
@@ -1726,9 +1754,24 @@
         unsettledCrystals: count(crystals, function (c) {
           return c.active && c.state !== 'settled';
         }),
-        internalEmissionsFromUnsettled: s.internalFromUnsettled,
-        internalFromTemporarySite: s.fromTemporary,
-        internalFromPermanentCluster: s.fromPermanent,
+        internalBursts: s.internalBursts,
+        acceptanceBursts: s.acceptanceBursts,
+        homeBursts: s.homeBursts,
+        internalSizeClasses: {
+          medium: s.sizeClassCounts[0],
+          large: s.sizeClassCounts[1],
+          xlarge: s.sizeClassCounts[2]
+        },
+        internalParticles: s.internalParticles,
+        droppedInternalBursts: s.droppedInternalBursts,
+        peakActiveCounters: s.peakActiveCounters,
+        latestBurst: {
+          burstId: latestBurst.burstId,
+          triggerId: latestBurst.triggerId,
+          triggerKind: latestBurst.triggerKind,
+          sourceCategories: latestBurst.sourceCategories.slice(),
+          sizeClasses: latestBurst.sizeClasses.slice()
+        },
         internalIntervalMin: s.intervalMinSeen === Infinity ? 0 : s.intervalMinSeen,
         internalIntervalMax: s.intervalMaxSeen,
         crystallizations: s.crystallizations,
