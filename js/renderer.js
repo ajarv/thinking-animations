@@ -126,13 +126,7 @@
     const edgeViews = network.edges.map(function (edge) {
       const base = openPath();
       base.strokeColor = C.thinAxon;
-      return { edge: edge, base: base, thick: null, length: 1, key: '' };
-    });
-    edgeViews.forEach(function (ev) {
-      ev.thick = openPath();
-      ev.thick.strokeColor = C.knowledge;
-      ev.thick.strokeCap = 'butt';
-      ev.thick.visible = false;
+      return { edge: edge, base: base };
     });
 
     const neuronViews = network.neurons.map(function (neuron) {
@@ -203,7 +197,6 @@
       PALETTE_KEYS.forEach(function (key) { P[key] = mix(C[key], NIGHT[key], t); });
       edgeViews.forEach(function (ev) {
         ev.base.strokeColor = P.thinAxon;
-        ev.thick.strokeColor = P.knowledge;
       });
       neuronViews.forEach(function (nv) {
         for (let i = 0; i < nv.dendrites.length; i++) nv.dendrites[i].strokeColor = P.dendrite;
@@ -281,7 +274,6 @@
       paintBackground();
 
       const thinWidth = Math.max(0.55, cell * 0.0105);
-      const thickWidth = Math.max(2.3, cell * 0.075);
       edgeViews.forEach(function (ev) {
         const e = ev.edge;
         const p0 = px(e.p0.x, e.p0.y);
@@ -293,11 +285,7 @@
           new Segment(p3, p2.subtract(p3), null)
         ];
         ev.base.segments = segments;
-        ev.thick.segments = segments.map(function (s) { return s.clone(); });
         ev.base.strokeWidth = thinWidth;
-        ev.thick.strokeWidth = thickWidth;
-        ev.length = Math.max(1, ev.base.length);
-        ev.key = '';
       });
 
       const somaRadius = Math.max(2.5, cell * 0.067);
@@ -335,32 +323,15 @@
       });
     }
 
+    // Consolidated knowledge is shown as purple neurons. The same strength
+    // that once drew a thick axon now moves the soma and nucleus to purple.
     function drawKnowledge() {
-      edgeViews.forEach(function (ev) {
-        const e = ev.edge;
-        const show = e.seedAt >= 0 && e.strength > 0.004;
-        if (!show) {
-          if (ev.thick.visible) ev.thick.visible = false;
-          ev.key = '';
-          return;
-        }
-        const interval = sim.seedInterval(e);
-        const key = interval.start.toFixed(3) + ':' + interval.end.toFixed(3);
-        if (key === ev.key && ev.thick.visible) return;
-        ev.key = key;
-        ev.thick.visible = true;
-        const before = ev.length * interval.start;
-        const filled = Math.max(0.1, ev.length * (interval.end - interval.start));
-        ev.thick.dashArray = [filled, ev.length * 2 + 2];
-        ev.thick.dashOffset = -before;
-      });
-
       neuronViews.forEach(function (nv) {
-        const strength = nv.neuron.strength;
+        const strength = nv.neuron.crystal || 0;
         if (Math.abs(strength - nv.shown) < 0.004) return;
         nv.shown = strength;
-        nv.soma.fillColor = mix(P.somaLight, P.somaDark, strength);
-        nv.nucleus.fillColor = mix(P.nucleusLight, P.nucleusDark, strength);
+        nv.soma.fillColor = mix(P.somaLight, C.crystalSoma, strength);
+        nv.nucleus.fillColor = mix(P.nucleusLight, C.crystalNucleus, strength);
       });
     }
 

@@ -293,18 +293,16 @@
     }
 
     // Age follows the highest saturation reached, so consolidation during
-    // sleep never makes the brain younger.
+    // sleep never makes the brain younger. Saturation is the mean
+    // crystallization of the neurons, not axon coverage.
     function refreshKnowledge() {
       if (!knowledgeDirty) return;
       knowledgeDirty = false;
-      let covered = 0;
-      for (let i = 0; i < edges.length; i++) {
-        const edge = edges[i];
-        if (edge.seedAt < 0) continue;
-        const interval = seedInterval(edge);
-        covered += (interval.end - interval.start) * edge.length;
+      let sum = 0;
+      for (let i = 0; i < neurons.length; i++) {
+        sum += neurons[i].crystal || 0;
       }
-      s.saturation = covered / network.totalLength;
+      s.saturation = sum / neurons.length;
       s.peakSaturation = Math.max(s.peakSaturation, s.saturation);
       s.age = LIFE.maxAge * lifeProgress();
       if (s.peakSaturation >= LIFE.saturationLimit - LIFE.epsilon) {
@@ -315,7 +313,7 @@
       centers = [];
       for (let i = 0; i < neurons.length; i++) {
         const neuron = neurons[i];
-        neuron.strength = neuron.domain >= 0 ? centerStrength(neuron) : 0;
+        neuron.strength = neuron.crystal || 0;
         if (neuron.strength >= config.centerMin) centers.push(neuron);
       }
     }
@@ -1080,23 +1078,14 @@
       domain.radius = radius;
     }
 
+    // Sleep writes knowledge onto the neuron itself. Axon strength stays 0,
+    // so nothing thickens. crystal 1 is the old "fully thick" mark.
     function feedNeuron(neuron, amount) {
-      const adjacent = neuron.adjacent;
-      if (!adjacent.length || amount <= 0) return;
-      const share = amount / adjacent.length;
+      if (!neuron || amount <= 0) return;
       s.fed += amount;
-      adjacent.forEach(function (edge) {
-        const near = edge.from === neuron ? 0.14 : 0.86;
-        if (edge.seedAt < 0) {
-          edge.seedAt = near;
-          edge.strength = share;
-          s.seedEvents++;
-        } else {
-          edge.seedAt = lerp(edge.seedAt, near, 0.25);
-          edge.strength = clamp(edge.strength + share, 0, 1);
-        }
-      });
-      neuron.strength = centerStrength(neuron);
+      neuron.crystal = clamp((neuron.crystal || 0) + amount, 0, 1);
+      neuron.strength = neuron.crystal;
+      if (neuron.crystal > 0) s.seedEvents++;
       touchKnowledge();
     }
 
@@ -1113,21 +1102,7 @@
     }
 
     function feedAnchor(anchor, amount) {
-      const adjacent = anchor.adjacent;
-      if (!adjacent.length || amount <= 0) return;
-      const share = amount / adjacent.length;
-      s.fed += amount;
-      adjacent.forEach(function (edge) {
-        const near = edge.from === anchor ? 0.14 : 0.86;
-        if (edge.seedAt < 0) {
-          edge.seedAt = near;
-          edge.strength = share;
-          s.seedEvents++;
-        } else {
-          edge.seedAt = lerp(edge.seedAt, near, 0.25);
-          edge.strength = clamp(edge.strength + share, 0, 1);
-        }
-      });
+      feedNeuron(anchor, amount);
     }
 
     // Once per thought per sleep: keep it for a permanent home, or toss it.
@@ -1468,6 +1443,7 @@
       neurons.forEach(function (neuron) {
         neuron.pending = 0;
         neuron.strength = 0;
+        neuron.crystal = 0;
       });
       for (let i = 0; i < CATEGORY_COUNT; i++) settledCount[i] = 0;
       knowledgeDirty = true;

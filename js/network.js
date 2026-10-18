@@ -39,6 +39,7 @@
           outgoing: [],
           adjacent: [],
           strength: 0,
+          crystal: 0,
           pending: 0,
           category: -1
         });

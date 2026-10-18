@@ -200,6 +200,10 @@
       somaDark: '#294b8b',
       nucleusLight: '#f2f8fd',
       nucleusDark: '#8eaedf',
+      // Consolidated knowledge: a neuron moves toward these as its strength
+      // rises during sleep. Axons stay thin.
+      crystalSoma: '#6a1b9a',
+      crystalNucleus: '#ce93d8',
       counter: '#1d6fe3',
       counterCore: '#e5f0ff',
       // Homed thoughts: orange while temporary or traveling, light green once settled.

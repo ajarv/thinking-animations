@@ -1,5 +1,9 @@
 # Paper Life
 
+**Purple crystallization variant.** On this branch a neuron does not thicken its axons. The same sleep deposit that used to raise axon strength now raises that neuron's crystallization, from 0 to 1. Saturation is the mean of those levels, so age still moves only while sleep crystallizes neurons, and peak saturation still never falls. A resting soma keeps its normal color; a partial level blends toward purple; a fully crystallized neuron (level 1, the old full-thickness mark) is soma `#6a1b9a` and nucleus `#ce93d8`. When a neuron reaches 1, its domain grows and adjoining neurons start to crystallize on later sleep deposits. Daytime still does not crystallize anything. Temporary orange homes, light-green permanent thoughts, blue internal thoughts, the sleep colors, the lust slider, and the scattered centers are unchanged. The sections below describe the thickening model this variant replaces; where they say thickness or a dark axon, read crystallization and purple.
+
+
+
 Paper Life is one brain, drawn as a network, living from birth toward a saturation limit. Outside thoughts enter at the border, shrink as they travel, and sometimes find a temporary home. Internal thoughts answer from category centers. Sleep is automatic: kept homes fly to a permanent cluster, and only then does the brain lay down knowledge as thickness on the axons around that cluster. Age is that knowledge, not the clock.
 
 Serve the `Paper-life` folder and open `index.html`. Paper.js 0.12.17 is loaded from the CDN, so a static server is required.
@@ -260,7 +264,7 @@ There is no spatial hash. A meeting test walks active internal thoughts against 
 
 Node, `advance(1/60)` for 400 simulated seconds: about 15.9 ms of wall time per simulated second. In that run, two nights, age about 19, saturation about 0.144, peak 362 internal thoughts, zero bursts dropped.
 
-Headless Chrome at 1440×900, `?still=1&diag=1&t=0.15`: phase `awake`, one acceptance burst, 7 live internal thoughts, categories distinct, all three size classes present, zero drops. The fixed Paper item count is 6,658 paths: one per axon and its knowledge overlay, per neuron part, per pooled thought, internal thought, crystal, and wave.
+Headless Chrome at 1440×900, `?still=1&diag=1&t=0.15`: phase `awake`, one acceptance burst, 7 live internal thoughts, categories distinct, all three size classes present, zero drops. Paths are created once: one per axon and its knowledge overlay, per neuron part, per pooled thought, internal thought, crystal, and wave. A `?bench=1` frame-time dump was not returned by headless Chrome in this pass, so average and p95 frame time are not reported.
 
 ## Tuning
 
