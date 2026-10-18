@@ -22,7 +22,13 @@
 
     const C = {};
     Object.keys(config.colors).forEach(function (key) {
+      if (key === 'night') return;
       C[key] = toColor(config.colors[key]);
+    });
+    const NIGHT = {};
+    const nightColors = config.colors.night || {};
+    Object.keys(nightColors).forEach(function (key) {
+      NIGHT[key] = toColor(nightColors[key]);
     });
     const KIND_COLORS = {};
     Object.keys(config.kinds).forEach(function (kind) {
@@ -59,6 +65,14 @@
     function place(path, x, y, radius) {
       path.matrix = new paper.Matrix(radius, 0, 0, radius, x, y);
     }
+
+    // Foreground palette for the current darkness: day colors at 0, the
+    // night colors at 1. Awake and REM sit at 0, so their look is unchanged.
+    const PALETTE_KEYS = Object.keys(NIGHT);
+    const P = {};
+    PALETTE_KEYS.forEach(function (key) { P[key] = C[key]; });
+    let paletteStep = 0;
+    const PALETTE_STEPS = 40;
 
     let sx = 1;
     let sy = 1;
@@ -173,7 +187,35 @@
 
     // Background mood eases toward its target over ~1.5–2 s of simulated time.
     // A time jump (seek, reset, first frame) snaps straight to the target.
-    const mood = { center: C.bgCenter.clone(), edge: C.bgEdge.clone(), time: null, key: '' };
+    const mood = { center: C.bgCenter.clone(), edge: C.bgEdge.clone(), dark: 0, time: null, key: '' };
+
+    function darkTarget(snap) {
+      if (snap.phase === 'deep') return 1;
+      if (snap.phase === 'waking') return 1 - (snap.phaseBlend || 0);
+      return 0;
+    }
+
+    function applyPalette() {
+      const step = Math.round(mood.dark * PALETTE_STEPS);
+      if (step === paletteStep) return;
+      paletteStep = step;
+      const t = step / PALETTE_STEPS;
+      PALETTE_KEYS.forEach(function (key) { P[key] = mix(C[key], NIGHT[key], t); });
+      edgeViews.forEach(function (ev) {
+        ev.base.strokeColor = P.thinAxon;
+        ev.thick.strokeColor = P.knowledge;
+      });
+      neuronViews.forEach(function (nv) {
+        for (let i = 0; i < nv.dendrites.length; i++) nv.dendrites[i].strokeColor = P.dendrite;
+        nv.soma.strokeColor = P.dendrite;
+        nv.shown = -1;
+      });
+      ringViews.forEach(function (ring) { ring.strokeColor = P.anchorRing; });
+      counterViews.forEach(function (cv) {
+        cv.halo.fillColor = P.counter;
+        cv.bead.fillColor = P.counter;
+      });
+    }
 
     // Each phase has one target color. The mood lerp below is what makes the
     // whole screen take about 1.5–2 s to arrive there.
@@ -212,6 +254,7 @@
       mood.time = snap.time;
       const k = dt < 0 || dt > 0.5 ? 1 : 1 - Math.exp(-dt / 0.55);
       if (k <= 0) return;
+      mood.dark += (darkTarget(snap) - mood.dark) * k;
       mood.center = mix(mood.center, target.center, k);
       mood.edge = mix(mood.edge, target.edge, k);
       const key = mood.center.toCSS(true) + mood.edge.toCSS(true);
@@ -274,11 +317,11 @@
           const dendrite = nv.dendrites[i];
           dendrite.segments = [start, middle, end];
           dendrite.smooth({ type: 'continuous' });
-          dendrite.strokeColor = C.dendrite;
+          dendrite.strokeColor = P.dendrite;
           dendrite.strokeWidth = dendriteWidth;
         }
         place(nv.soma, center.x, center.y, somaRadius);
-        nv.soma.strokeColor = C.dendrite;
+        nv.soma.strokeColor = P.dendrite;
         nv.soma.strokeWidth = dendriteWidth / somaRadius;
         place(nv.nucleus, center.x - somaRadius * 0.16, center.y - somaRadius * 0.1, somaRadius * 0.34);
         nv.shown = -1;
@@ -316,8 +359,8 @@
         const strength = nv.neuron.strength;
         if (Math.abs(strength - nv.shown) < 0.004) return;
         nv.shown = strength;
-        nv.soma.fillColor = mix(C.somaLight, C.somaDark, strength);
-        nv.nucleus.fillColor = mix(C.nucleusLight, C.nucleusDark, strength);
+        nv.soma.fillColor = mix(P.somaLight, P.somaDark, strength);
+        nv.nucleus.fillColor = mix(P.nucleusLight, P.nucleusDark, strength);
       });
     }
 
@@ -365,14 +408,21 @@
           cv.bead.visible = false;
           return;
         }
-        const fade = fadeFor(c.age, c.ttl, 0.7);
+        const u = c.ttl > 0 ? c.age / c.ttl : 1;
+        const fade = Math.max(0, 1 - Math.max(0, u - 0.62) / 0.38);
+        const radius = thoughtRadius * sim.counterVisualSize(c);
         const x = c.x * sx;
         const y = c.y * sy;
+        if (radius < 0.04) {
+          cv.halo.visible = false;
+          cv.bead.visible = false;
+          return;
+        }
         cv.halo.visible = true;
-        place(cv.halo, x, y, counterRadius * 3.4);
+        place(cv.halo, x, y, radius * 3.4);
         cv.halo.opacity = 0.16 * fade;
         cv.bead.visible = true;
-        place(cv.bead, x, y, counterRadius);
+        place(cv.bead, x, y, radius);
         cv.bead.strokeWidth = 0.28;
         cv.bead.opacity = 0.94 * fade;
       });
@@ -445,7 +495,7 @@
         const partner = sim.partnerPosition(c);
         cv.partner.visible = true;
         place(cv.partner, partner.x * sx, partner.y * sy, counterRadius * 0.8);
-        cv.partner.fillColor = C.counter;
+        cv.partner.fillColor = P.counter;
         cv.partner.opacity = 0.55;
       });
       drawnAt = now;
@@ -461,7 +511,8 @@
         ring.strokeWidth = Math.max(0.8, cell * 0.02) / radius;
         const presence = asleep ? 0.62 : (counts[i] > 0 ? 0.34 : 0.1);
         const weight = 0.72 + 0.4 * (weights[i] / 1.8);
-        ring.opacity = lerp(ring.opacity, presence * weight, 0.12);
+        const target = Math.min(1, presence * weight * (1 + 0.45 * mood.dark));
+        ring.opacity = lerp(ring.opacity, target, 0.12);
       });
     }
 
@@ -498,7 +549,7 @@
         }
         const u = clamp(wave.age / Math.max(wave.ttl, 0.001), 0, 1);
         place(viewW.path, wave.x * sx, wave.y * sy, span * (0.045 + 0.74 * u));
-        const peak = wave.type === 'stress' ? 0.58 : 0.48;
+        const peak = wave.type === 'stress' ? 0.58 + 0.22 * mood.dark : 0.48;
         viewW.path.opacity = envelopes[i] * peak * scale;
         viewW.path.visible = viewW.path.opacity > 0.012;
       }
@@ -507,6 +558,7 @@
     function draw(snap) {
       const asleep = snap.asleep;
       updateMood(snap);
+      applyPalette();
       drawWaves(snap);
       drawKnowledge();
       drawRings(asleep);

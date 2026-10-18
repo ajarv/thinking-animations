@@ -83,18 +83,12 @@
     samples.sort(function (a, b) { return a - b; });
     let sum = 0;
     for (let i = 0; i < samples.length; i++) sum += samples[i];
-    function countItems(item) {
-      let n = 1;
-      const kids = item.children;
-      if (!kids) return n;
-      for (let i = 0; i < kids.length; i++) n += countItems(kids[i]);
-      return n;
-    }
+    const layer = paper.project.activeLayer;
     const report = {
       frames: frames,
       avgMs: +(sum / frames).toFixed(3),
       p95Ms: +samples[Math.min(frames - 1, Math.floor(frames * 0.95))].toFixed(3),
-      paperItems: countItems(paper.project) - 1
+      paperItems: layer && layer.children ? layer.children.length : 0
     };
     root.__bench = report;
     const diag = document.createElement('pre');

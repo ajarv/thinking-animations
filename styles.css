@@ -17,8 +17,9 @@ canvas {
   position: fixed;
   top: 18px;
   left: 18px;
+  z-index: 5;
   width: 268px;
-  padding: 14px 16px 12px;
+  padding: 10px 16px 12px;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.72);
   box-shadow: 0 6px 24px rgba(40, 80, 140, 0.12);
@@ -26,6 +27,71 @@ canvas {
   -webkit-backdrop-filter: blur(7px);
   color: #1d3866;
   user-select: none;
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+  transition: opacity 200ms ease, transform 200ms ease, visibility 0s linear;
+}
+
+#hud.is-hidden {
+  opacity: 0;
+  transform: translateY(-8px);
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 200ms ease, transform 200ms ease, visibility 0s linear 200ms;
+}
+
+.hud-head {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 4px;
+}
+
+#hideControls,
+#showControls {
+  font-family: inherit;
+  font-weight: 700;
+  color: #22407e;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+#hideControls {
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  padding: 2px 6px;
+}
+
+#showControls {
+  position: fixed;
+  top: 18px;
+  left: 18px;
+  z-index: 6;
+  display: none;
+  border: 0;
+  padding: 8px 14px;
+  font-size: 13px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 6px 24px rgba(40, 80, 140, 0.12);
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+}
+
+#showControls.is-on {
+  display: inline-block;
+}
+
+#hideControls:focus-visible,
+#showControls:focus-visible {
+  outline: 2px solid #22407e;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #hud { transition: none; }
 }
 
 .row {
@@ -96,11 +162,11 @@ canvas {
 }
 
 #needFill.rem {
-  background: linear-gradient(90deg, #d5d5da, #8d8d98);
+  background: linear-gradient(90deg, #d4eed8, #6fb27a);
 }
 
 #needFill.deep {
-  background: linear-gradient(90deg, #cfe8d4, #5ea36a);
+  background: linear-gradient(90deg, #8c9099, #33373e);
 }
 
 #needFill.waking {

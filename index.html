@@ -10,7 +10,11 @@
 <body>
 <canvas id="stage"></canvas>
 <div id="veil"></div>
-<div id="hud">
+<button type="button" id="showControls" class="is-on" aria-label="Show controls" aria-controls="hud" aria-expanded="false">Show controls</button>
+<div id="hud" class="is-hidden">
+  <div class="hud-head">
+    <button type="button" id="hideControls" aria-label="Hide controls" aria-controls="hud" aria-expanded="false">Hide</button>
+  </div>
   <div class="row">
     <span class="label">Knowledge saturation</span>
     <span class="val" id="kVal">0%</span>

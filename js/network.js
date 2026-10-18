@@ -115,18 +115,45 @@
       }
     }
 
-    const anchors = [];
-    const grid = config.categories;
-    for (let r = 0; r < grid.rows; r++) {
-      for (let c = 0; c < grid.cols; c++) {
-        const neuron = nodeAt(
-          Math.round((c + 0.5) / grid.cols * cols - 0.5),
-          Math.round((r + 0.5) / grid.rows * rows - 0.5)
-        );
-        neuron.category = anchors.length;
-        anchors.push(neuron);
-      }
+    // 21 category centers, scattered. The same mulberry32(23) stream that
+    // jittered the neurons continues here, so the scatter is fixed for a life.
+    // Families stay 0–6 danger, 7–13 attraction, 14–20 everyday, but those
+    // indexes are not rows on the screen.
+    const inset = 2;
+    const pool = [];
+    for (let i = 0; i < neurons.length; i++) {
+      const neuron = neurons[i];
+      if (
+        neuron.col >= inset && neuron.col <= cols - 1 - inset &&
+        neuron.row >= inset && neuron.row <= rows - 1 - inset
+      ) pool.push(neuron);
     }
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      const swap = pool[i];
+      pool[i] = pool[j];
+      pool[j] = swap;
+    }
+
+    function farEnough(neuron, chosen, separation) {
+      for (let k = 0; k < chosen.length; k++) {
+        const dx = neuron.col - chosen[k].col;
+        const dy = neuron.row - chosen[k].row;
+        if (dx * dx + dy * dy < separation * separation) return false;
+      }
+      return true;
+    }
+
+    let separation = 3;
+    let anchors = [];
+    while (anchors.length < 21 && separation >= 0) {
+      anchors = [];
+      for (let i = 0; i < pool.length && anchors.length < 21; i++) {
+        if (farEnough(pool[i], anchors, separation)) anchors.push(pool[i]);
+      }
+      if (anchors.length < 21) separation -= 0.5;
+    }
+    for (let i = 0; i < anchors.length; i++) anchors[i].category = i;
 
     function pointOnEdge(edge, t) {
       const target = U.clamp(t, 0, 1) * edge.length;
@@ -145,6 +172,7 @@
       neurons: neurons,
       edges: edges,
       anchors: anchors,
+      anchorSeparation: separation,
       nodeAt: nodeAt,
       pointOnEdge: pointOnEdge,
       totalLength: edges.reduce(function (sum, edge) {

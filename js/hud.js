@@ -36,7 +36,69 @@
 
     const lustInput = byId('lust');
     const lustVal = byId('lustVal');
+    const hud = byId('hud');
+    const hideButton = byId('hideControls');
+    const showButton = byId('showControls');
+    const STORE = 'paperLife.hudHidden';
     let dragging = false;
+    let hidden = true;
+    let pending = null;
+
+    function storedHidden() {
+      try {
+        const value = root.localStorage.getItem(STORE);
+        if (value === null) return true;
+        return value === '1';
+      } catch (err) {
+        return true;
+      }
+    }
+
+    function remember(isHidden) {
+      try {
+        root.localStorage.setItem(STORE, isHidden ? '1' : '0');
+      } catch (err) {}
+    }
+
+    function applyHidden(isHidden) {
+      hidden = isHidden;
+      if (hud) hud.classList.toggle('is-hidden', isHidden);
+      if (showButton) {
+        showButton.classList.toggle('is-on', isHidden);
+        showButton.setAttribute('aria-expanded', isHidden ? 'false' : 'true');
+      }
+      if (hideButton) hideButton.setAttribute('aria-expanded', isHidden ? 'false' : 'true');
+      if (!isHidden && pending) {
+        const snap = pending;
+        pending = null;
+        update(snap);
+      }
+    }
+
+    // The box starts hidden. A saved choice is kept. ?hud=0 or ?hud=1
+    // overrides that choice for this load only.
+    (function decide() {
+      const params = new URLSearchParams(root.location.search);
+      const query = params.get('hud');
+      if (query === '0') applyHidden(true);
+      else if (query === '1') applyHidden(false);
+      else applyHidden(storedHidden());
+    })();
+
+    if (hideButton) {
+      hideButton.addEventListener('click', function () {
+        applyHidden(true);
+        remember(true);
+        if (showButton) showButton.focus();
+      });
+    }
+    if (showButton) {
+      showButton.addEventListener('click', function () {
+        applyHidden(false);
+        remember(false);
+        if (hideButton) hideButton.focus();
+      });
+    }
 
     function endDrag() {
       if (!dragging) return;
@@ -59,6 +121,20 @@
     document.addEventListener('pointerup', endDrag);
 
     function update(snap) {
+      let fade = 0;
+      if (snap.finishedAt >= 0) {
+        fade = U.smoothstep(snap.hold - 0.9, snap.hold, snap.time - snap.finishedAt);
+      } else if (snap.time < 0.6) {
+        fade = 1 - U.smoothstep(0, 0.6, snap.time);
+      }
+      veil.style.opacity = fade.toFixed(3);
+
+      if (hidden) {
+        pending = snap;
+        return;
+      }
+      pending = null;
+
       const percent = Math.round(snap.saturation * 100);
       const age = Math.floor(snap.age);
       kVal.textContent = percent + '%';
@@ -118,14 +194,6 @@
           waveNote.className = '';
         }
       }
-
-      let fade = 0;
-      if (snap.finishedAt >= 0) {
-        fade = U.smoothstep(snap.hold - 0.9, snap.hold, snap.time - snap.finishedAt);
-      } else if (snap.time < 0.6) {
-        fade = 1 - U.smoothstep(0, 0.6, snap.time);
-      }
-      veil.style.opacity = fade.toFixed(3);
 
       if (lustInput && !dragging && snap.lust !== undefined) {
         const shown = Math.round(snap.lust);

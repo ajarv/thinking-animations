@@ -63,7 +63,10 @@
     });
 
     const counters = pool(config.pools.counters, function (id) {
-      return { id: id, active: false, x: 0, y: 0, vx: 0, vy: 0, age: 0, ttl: 1, sourceId: -1 };
+      return {
+        id: id, active: false, x: 0, y: 0, vx: 0, vy: 0,
+        age: 0, ttl: 1, sourceId: -1, initialScale: 1
+      };
     });
 
     // A crystal is an external thought that found a temporary home. It turns
@@ -192,6 +195,27 @@
       const t = u < 0 ? 0 : u > 1 ? 1 : u;
       if (rejected) return entry * (1 - t);
       return config.fadeScale + (entry - config.fadeScale) * Math.pow(1 - t, config.shrinkPower);
+    }
+
+    // Dimensionless bead size, before the renderer's pixel scale. External
+    // thoughts use kind size times their shrinking travel scale. An orange
+    // temporary or wandering home is exactly 2× its kind. An internal thought
+    // stores that number at birth and shrinks it to zero over its own life.
+    function thoughtVisualSize(p) {
+      return KINDS[p.kind].size * thoughtScale(p.age, p.ttl, p.rejected);
+    }
+
+    function crystalVisualSize(c) {
+      const factor = (c.state === 'temporary' || c.state === 'wandering')
+        ? config.crystalScale
+        : 1;
+      return KINDS[c.kind].size * factor;
+    }
+
+    function counterVisualSize(c) {
+      const u = c.ttl > 0 ? c.age / c.ttl : 1;
+      const t = u < 0 ? 0 : u > 1 ? 1 : u;
+      return c.initialScale * Math.pow(1 - t, config.internal.shrinkPower);
     }
 
     let knowledgeDirty = true;
@@ -469,7 +493,7 @@
       p.active = true;
       enterEdge(p, first);
       placeThought(p);
-      if (hash(serial, 23.9) < housingChance()) emitCounters(serial);
+      if (hash(serial, 23.9) < housingChance()) emitCounters(p, serial);
     }
 
     function stepThoughts(dt) {
@@ -520,7 +544,7 @@
 
     // ---------- Internal counter-thoughts ----------
 
-    function emitCounter(neuron, serial, index) {
+    function emitCounter(neuron, serial, index, visualSize) {
       const c = takeFree(counters);
       if (!c || !neuron) return false;
       const ageRatio = s.age / LIFE.maxAge;
@@ -536,6 +560,7 @@
         hash(serial * 1.7, index * 3.1 + 0.4) * lerp(1.8, 0.65, ageRatio)) *
         (asleep ? 1.8 : 1);
       c.sourceId = neuron.id;
+      c.initialScale = visualSize > 0 ? visualSize : 1;
       s.countersEmitted++;
       return true;
     }
@@ -592,7 +617,7 @@
       const neuron = useHome
         ? homes[Math.floor(hash(c.id, s.time + 2.2) * homes.length)]
         : siteNeuron(c);
-      if (!emitCounter(neuron, c.id * 17 + s.internalFromUnsettled, 1)) return;
+      if (!emitCounter(neuron, c.id * 17 + s.internalFromUnsettled, 1, crystalVisualSize(c))) return;
       s.internalFromUnsettled++;
       if (useHome) s.fromPermanent++;
       else s.fromTemporary++;
@@ -600,16 +625,17 @@
 
     function stepUnsettledEmissions() {
       crystals.forEach(function (c) {
-        if (!c.active || c.state === 'settled') return;
+        if (!c.active || c.state === 'settled' || c.state === 'tossed') return;
         if (s.time < c.nextInternal) return;
         emitFromUnsettled(c);
         scheduleInternal(c);
       });
     }
 
-    function emitCounters(serial) {
+    function emitCounters(trigger, serial) {
       const hosts = hostCenters();
-      if (!hosts.length) return;
+      if (!hosts.length || !trigger) return;
+      const visualSize = thoughtVisualSize(trigger);
       const spread = asleep ? 3 : Math.min(3, hosts.length);
       const count = Math.min(
         hosts.length,
@@ -632,7 +658,7 @@
             break;
           }
         }
-        emitCounter(candidates[index], serial, i);
+        emitCounter(candidates[index], serial, i, visualSize);
         candidates.splice(index, 1);
       }
     }
@@ -831,12 +857,7 @@
       thoughts.forEach(function (p) {
         if (!p.active || p.rejected || !p.edge) return;
         if (p.housingRoll >= chance) return;
-        const scale = KINDS[p.kind].size;
-        reds.push({
-          p: p,
-          collide2: Math.pow(0.15 * scale, 2),
-          reach2: Math.pow(0.36 * scale, 2)
-        });
+        reds.push({ p: p, redVis: thoughtVisualSize(p) });
       });
       if (!reds.length) return;
       const claimed = {};
@@ -851,7 +872,8 @@
           const dx = red.p.x - counter.x;
           const dy = red.p.y - counter.y;
           const d2 = dx * dx + dy * dy;
-          if (d2 <= red.collide2 && d2 < bestD) {
+          const span = 0.5 * (red.redVis + counterVisualSize(counter)) / config.entryScale;
+          if (d2 <= 0.0225 * span * span && d2 < bestD) {
             bestD = d2;
             best = red;
           }
@@ -860,8 +882,9 @@
 
         const mx = (best.p.x + counter.x) * 0.5;
         const my = (best.p.y + counter.y) * 0.5;
+        const span = 0.5 * (best.redVis + counterVisualSize(counter)) / config.entryScale;
         let nearest = null;
-        let nearestD = best.reach2;
+        let nearestD = 0.1296 * span * span;
         for (let i = 0; i < hosts.length; i++) {
           const neuron = hosts[i];
           if (neuron.id === counter.sourceId) continue;
@@ -971,8 +994,24 @@
       return removed;
     }
 
+    function nearestAnchorGap() {
+      let min = Infinity;
+      for (let i = 0; i < anchors.length; i++) {
+        for (let j = i + 1; j < anchors.length; j++) {
+          const dx = anchors[i].x - anchors[j].x;
+          const dy = anchors[i].y - anchors[j].y;
+          const dist = Math.hypot(dx, dy);
+          if (dist < min) min = dist;
+        }
+      }
+      return min;
+    }
+
+    const ANCHOR_GAP = nearestAnchorGap();
+
     function initialRadius(cat) {
-      return 0.72 + 0.5 * (CATEGORY_WEIGHTS[cat] / 1.8);
+      const base = 0.72 + 0.5 * (CATEGORY_WEIGHTS[cat] / 1.8);
+      return Math.min(base, ANCHOR_GAP * 0.42);
     }
 
     function initDomains() {
@@ -1477,7 +1516,7 @@
     }
 
     // Awake is blue. Rising need blends toward red. Just after waking, the
-    // phase stays "waking" so the screen can ease from deep green back to blue.
+    // phase stays "waking" so the screen can ease from deep dark gray back to blue.
     function assignAwakePhase() {
       if (s.lastWakeAt >= 0 && s.stateTime < SLEEP.wakeBlend && s.need < SLEEP.needPhase) {
         setPhase('waking', s.stateTime / SLEEP.wakeBlend);
@@ -1802,6 +1841,9 @@
       domainRadius: function (index) { return domains[index].radius; },
       categoryWeights: function () { return CATEGORY_WEIGHTS.slice(); },
       thoughtScale: thoughtScale,
+      thoughtVisualSize: thoughtVisualSize,
+      crystalVisualSize: crystalVisualSize,
+      counterVisualSize: counterVisualSize,
       snapshot: snapshot,
       stats: stats
     };

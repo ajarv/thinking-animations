@@ -54,7 +54,9 @@
     internal: {
       intervalMin: 2.5,
       intervalMax: 5.5,
-      sleepScale: 0.72
+      sleepScale: 0.72,
+      // Visible size falls as initialScale * (1 − age/ttl) ^ shrinkPower.
+      shrinkPower: 1.2
     },
 
     learning: {
@@ -67,11 +69,10 @@
       rejectMax: 0.55
     },
 
-    // 21 permanent home clusters, laid out 7 x 3. Each row is a family:
-    // top row danger, middle row attraction, bottom row everyday thoughts.
-    // The same seven weights repeat down each column, from small to large:
-    // about 0.6 to 1.8, so the biggest category holds about three times the
-    // smallest and none of them is empty or dominant.
+    // 21 permanent homes in three families of seven. cols and rows count
+    // the families, not a screen grid: the anchors are scattered. The same
+    // seven weights repeat in each family, about 0.6 to 1.8, so the biggest
+    // category holds about three times the smallest.
     categories: {
       cols: 7,
       rows: 3,
@@ -90,7 +91,7 @@
       minAwake: 8,
       // needPhase is where "needs sleep" begins; the red blend is the need
       // itself and is full at 1. wakeBlend is how long waking eases from
-      // deep green back to blue. tossFade is how long a tossed thought fades.
+      // deep dark gray back to light blue. tossFade is how long a tossed thought fades.
       needPhase: 0.2,
       wakeBlend: 1.8,
       tossFade: 1.2,
@@ -158,18 +159,29 @@
       { age: 70, name: 'Older adult', sleep: 5, awake: 19, acceptance: 0.22, keep: 0.28, threshold: 1.15 }
     ],
 
+    ageBands: [
+      { name: 'Early childhood', max: 5 },
+      { name: 'Childhood', max: 12 },
+      { name: 'Adolescence', max: 18 },
+      { name: 'Early adulthood', max: 25 },
+      { name: 'Adulthood', max: 40 },
+      { name: 'Middle age', max: 60 },
+      { name: 'Later life', max: 80 },
+      { name: 'Elder years', max: 101 }
+    ],
+
     colors: {
-      // Background cycle: blue rested, red sleep-starved, gray REM,
-      // pale green deep sleep, then blue again. The pale green stays lighter
-      // than the settled thought beads.
+      // Background cycle: light blue rested, light red sleep-starved, very
+      // light green REM, dark gray deep sleep, then light blue again. REM
+      // stays far paler than the settled thought beads.
       bgCenter: '#f6fbff',
       bgEdge: '#d8eaf7',
       needCenter: '#fff1f1',
       needEdge: '#f6d5d5',
-      remCenter: '#f4f4f6',
-      remEdge: '#e2e2e6',
-      deepCenter: '#edf8ef',
-      deepEdge: '#d7eedb',
+      remCenter: '#f3fbf4',
+      remEdge: '#d9f0dc',
+      deepCenter: '#4f535a',
+      deepEdge: '#24272d',
       thinAxon: [0.30, 0.53, 0.76, 0.48],
       dendrite: [0.27, 0.49, 0.72, 0.66],
       knowledge: '#203f7d',
@@ -186,6 +198,20 @@
       settledCore: '#e8f5e9',
       settledEdge: '#43a047',
       anchorRing: '#2e7d32',
+      // Deep-sleep foreground. The renderer blends toward these as the
+      // background darkens, so axons, somas, rings, and counters stay
+      // legible on dark gray without turning pure white.
+      night: {
+        thinAxon: [0.62, 0.74, 0.88, 0.5],
+        dendrite: [0.6, 0.72, 0.86, 0.62],
+        knowledge: '#8fb4ec',
+        somaLight: '#5a6c88',
+        somaDark: '#a8c6f2',
+        nucleusLight: '#7f90a8',
+        nucleusDark: '#e1ebf8',
+        counter: '#5c9cff',
+        anchorRing: '#9ad7a0'
+      },
       // Hormone waves are a visual metaphor, not an assay. Reward is warm
       // gold into rose. Stress is crimson into violet.
       rewardGold: [1, 0.78, 0.28, 0.36],

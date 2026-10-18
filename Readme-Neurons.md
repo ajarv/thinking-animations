@@ -1,256 +1,262 @@
-# Paper Life — Neurons
+# Paper Life
 
-A Paper.js animation of one life, from age 0 to 100, played out on a brain of 377 neurons. Age is not a clock. It is how much of the wiring has become knowledge. Sleep is not a switch. It arrives when too many thoughts are parked in temporary homes, and it ends when those thoughts have found permanent clusters.
+A Paper.js animation of one life, from age 0 to 100, on a brain of 377 neurons. Age is not a clock. It is how much of the wiring has become knowledge. Sleep is not a switch. It arrives when too many thoughts are parked in temporary homes, and the length of that night is a function of how long the brain was awake and how old it is.
 
-Open `index.html` in a browser. The page loads Paper.js 0.12.17 from the CDN and then the scripts under `js/`.
+The model runs in grid cells. The renderer only turns those cells into pixels, so two windows of different sizes live the same life.
 
-## How the idea grew
+## Concept
 
-The picture started as thoughts moving along axons. Each later rule answered a question about what a life actually does.
+Outside thoughts enter large. While they travel they shrink. Each one ends in one of three ways:
 
-- Knowledge should thicken the axons it lives on, and it should arrive fast in youth and slow toward the end. Growth follows `cos(age°) − 0.0001`, with displayed age 0–100 mapped onto 0–90°.
-- Knowledge centers answer an arriving thought with blue internal thoughts. When a red thought and a blue internal thought meet near a different center, the pair crystallizes there. After that, only thoughts that have not yet found a permanent home keep provoking internal thoughts. A fully settled mind is quiet.
-- Thoughts enter from any border. Danger and attraction matter more than a walk in the park: they are larger, live longer, and are much more likely to find a home.
-- Age comes from knowledge saturation, and the life ends at 80% saturation. Youth has weak filters and a high appetite for risk. Age strengthens the filters and lowers that appetite, because a familiar input is mostly routed to knowledge that already exists, and some of it is turned away at the border.
-- Learning can be switched off. Thoughts still provoke counter-thoughts, but nothing is allowed to stop and become knowledge.
-- Sleep reorganizes the day. A thought that has just found a temporary home turns orange and doubles in size. At night it detaches, still orange and doubled, and travels to a classified cluster at three times its daytime speed. On arrival it turns light green and shrinks back to the regular size of the thought that arrived. The temporary site thins; the permanent site thickens. The 21 categories are uneven: some are built to hold more thoughts than others.
-- The brain decides for itself when to sleep. The whole screen follows the night: light blue on waking, light red as temporary homes pile up, light gray while those thoughts travel (REM sleep), pale green while they settle into clusters (deep sleep), then light blue again.
+1. **Fast rejection.** A familiar danger or attraction is recognized at the border and collapses in a fraction of a second. Nothing is left: no temporary home, no hormone wave, no thickness.
+2. **Temporary home.** The thought meets an internal counter-thought near a center and stops. The traveling bead disappears. An orange crystal appears at exactly twice the kind's regular size, however small the traveler had become.
+3. **Insignificance.** If it never finds a home, it keeps shrinking, fades, and is recycled. No residue.
+
+A temporary home is not yet knowledge. Knowledge is thickness, and thickness is laid down only during sleep, around permanent clusters. Attraction and danger, on the moment they take a temporary home, also brush the background with a wave. That wave is a visual metaphor for a reward response or a stress response, not a measured hormone.
 
 ## The network
 
-`js/network.js` builds the brain in grid space. One unit is one neuron cell, so the model does not depend on the window size. The renderer scales grid coordinates to pixels.
+377 neurons, the first Fibonacci number above 300, on a 29 by 13 grid. Neighbors are joined by 1,048 cubic Bézier axons, walkable in either direction. Twenty-one anchors are existing neurons, scattered by the same seeded shuffle that builds the brain (`mulberry32(23)`), at least two cells in from the border and about three cells apart. They are not arranged in rows. Categories 0–6 are still the danger family, 7–13 attraction, and 14–20 everyday thoughts, but a family is not a region of the screen.
 
-There are 29 columns and 13 rows, which is 377 neurons — the first Fibonacci number above 300. Each neuron is jittered slightly off its grid point so the mesh does not look mechanical. Axons are cubic Bézier curves:
+## Thoughts from outside
 
-- the first control point sits at 31% of the span plus a bend along the edge normal;
-- the second sits at 69% minus a smaller opposite bend;
-- the bend itself is `(hash − 0.5) × 0.72`.
+Three kinds enter from any border. Kind sizes stay in proportion at every scale.
 
-An arc-length table of 20 steps backs `pointOnEdge`, so a thought moves at a steady speed along the curve rather than along the parameter.
-
-The mesh is horizontal lanes, alternating diagonals, and vertical links. Every axon can be walked in either direction, which is what lets a thought enter from the left, right, top, or bottom border.
-
-Twenty-one of the neurons are anchors, on a 7×3 lattice (columns 2, 6, 10, 14, 18, 22, 26 and rows 2, 6, 10). Each row is a family:
-
-| Row | Family |
-| --- | --- |
-| Top | Danger |
-| Middle | Attraction |
-| Bottom | Everyday |
-
-## Thoughts
-
-External thoughts are born on a border neuron and travel inward along the axons. Three kinds are drawn:
-
-| Kind | Share of births | Lifetime | Relative size | Urge to find a home |
+| Kind | Share | Color | Regular size | Lifetime |
 | --- | --- | --- | --- | --- |
-| Danger | 16% | 9–13 s | 1.8 | Strong |
-| Attraction | 18% | 8–12 s | 1.6 | Strong |
-| Everyday | the rest | 1.5–2.8 s | 0.62 | Weak |
+| Danger | 16% | `#c62828` | 1.8 | long |
+| Attraction | 18% | `#c2185b` | 1.6 | long |
+| Everyday | the rest | `#ef9a9a` | 0.62 | short |
 
-Danger is deep red (`#c62828`), attraction is magenta (`#c2185b`), everyday thoughts are pale pink (`#ef9a9a`). Daytime speed is about `lerp(130, 205) / 72 × kind.speed` cells per second, so a thought crosses a few cells a second. Important thoughts are a little slower than everyday ones. A thought fades near the end of its lifetime, and it is removed if it reaches the far side or runs out of time.
+An accepted thought is drawn at `entryScale` (2.2) times its regular size. Scale then follows age divided by lifetime:
 
-While a thought is on a thickened stretch of axon it slows down. On a fully thick pathway it moves at 0.45 of its thin-axon speed, which is the visual of lingering in something already known.
+```
+scale = 0.15 + (2.2 − 0.15) × (1 − age/ttl) ^ 1.35
+```
 
-### Internal thoughts
+That is 2.2 at entry, about 0.95 at midlife, and 0.15 just before it vanishes. Opacity eases down over the last part of the life. The curve is computed from age and lifetime each frame. The bead is not grown by accumulating a delta, so it cannot drift.
 
-Blue internal thoughts (`#1d6fe3`) are caused. Nothing emits them merely because the brain is awake or asleep.
+How often thoughts are even allowed in depends on age. The spawn rate is multiplied by an acceptance factor that falls from 1.00 in infancy to 0.22 in later life. A border filter can still refuse a familiar danger or attraction after that. Those refusals use a lifetime of 0.22–0.38 seconds and a scale that collapses to zero. They do not emit internal thoughts.
 
-Two kinds of unsettled activity provoke them:
+## Temporary homes and hormone waves
 
-- An external thought, at the moment it enters, gets an initial answer: one to three knowledge centers emit a blue thought. Stronger centers are more likely to answer.
-- Every thought that is temporarily homed, and every thought traveling to a permanent cluster, has its own timer. Once every 2.5–5.5 seconds (a bit sooner during sleep, about 0.72 of that wait) it provokes exactly one blue thought. The timers are staggered by the thought's identity, so a full pool does not fire on one frame. If the counter pool is full, that tick is skipped and the next one is scheduled anyway.
+A red thought and a blue counter-thought that meet near a center other than the counter's source can crystallize, if lust allows it. The traveler is removed. The crystal is orange (`#ff9800`, core `#fff3e0`) at exactly 2× the kind's regular size, with a small blue partner bead beside it.
 
-The provoked thought leaves either the unsettled thought's own site, or, about half the time once any permanent cluster exists, one of those clusters. It travels in a straight line and fades when its lifetime ends or when it leaves the screen. It never crystallizes on its own. It only becomes half of a crystal when it meets a still-traveling external thought near a center.
+Exactly one wave is emitted per successful temporary home:
 
-A thought that has settled stops its timer permanently. Settled green clusters do not emit.
+| Thought | Wave | Colors | HUD |
+| --- | --- | --- | --- |
+| Attraction | `reward` | warm gold into rose | Reward response |
+| Danger | `stress` | crimson into violet | Stress response |
+| Everyday | none | | |
 
-The calm invariant: when no external thought is active, no thought is temporarily homed, and none is traveling, no new internal thoughts are created. Whatever is already in flight finishes its lifetime and the blue count falls to zero. Sleep does not add a pulse of its own. During a night the blue traffic tapers as orange thoughts arrive home and turn green.
+The wave starts at the home and expands across most of the screen for 0.9–1.3 simulated seconds, then fades. It is translucent, so the sleep colors underneath stay readable. Overlapping waves share one opacity cap. Ordinary housing, border rejection, meditation, sleep travel, permanent settlement, and rebalancing emit no wave. The stress wave stands for an adrenaline/cortisol-like response, not a single negative hormone. The reward wave stands for a dopamine-like pulse. Neither is a biological measurement.
 
-### Crystallization
+Waves live in a fixed pool of 16 and are stored in grid space (`x`, `y`, `type`, `kind`, `age`, `ttl`), so a seek to the same time reproduces them.
 
-A red thought and a blue counter-thought that meet near a knowledge center — other than the center that emitted the counter — stop. The thought is removed from the axon and becomes a crystal at that center. Bigger thoughts reach farther. This is the temporary home.
+## Internal thoughts and a calm mind
 
-The moment it homes, the thought turns orange (`#ff9800`, core `#fff3e0`) and is drawn at twice the bead size of the kind that arrived (`crystalScale` is 2). A small blue partner bead stays beside it, marking the internal thought that caught it. While learning is off, pairs never crystallize; both thoughts simply fade.
+Internal thoughts are blue (`#1d6fe3`). They are caused, not sprayed, and they are born the same size as the thought that caused them:
 
-## Knowledge, age, and the end of a life
+- A new external thought that is eligible to be thought about gets one initial burst of one to three counters as it enters. Each counter copies that traveler's current visible size (kind size times its shrinking scale). A fresh 2.2× entrant makes an equally large blue thought. An older, already-shrunken entrant makes a smaller one. A fast-rejected thought does not. A thought refused by meditation does not.
+- Every temporary home and every thought still traveling to a cluster has its own timer, once every 2.5–5.5 seconds (a little sooner during sleep). The counter copies that orange thought's size, which is 2× its kind, even when the counter is launched from a permanent cluster instead of the orange thought's own site. The timer stops forever once the thought settles.
 
-Axons thicken only during sleep, and only around the permanent clusters. A daytime thought can cross every axon in the brain, be filtered, find an orange temporary home, and provoke internal thoughts, and none of that changes `edge.strength`, plants a seed, or moves saturation. The temporary home remembers two things for the night: which neuron held it, and how much thickness it is carrying (`sleep.deposit`, smaller for an everyday thought, scaled by the cosine growth factor). That carry is not painted onto the axons.
+The copied size is stored as `initialScale` and does not change. From there the blue thought shrinks to nothing:
 
-Each axon starts bare. A seed covers a fraction of the axon that grows with strength, up to nearly the whole axon when the pathway is fully learned (`radius = 0.015 + 0.985 × strength^0.75`). Saturation is covered length divided by total axon length. While the brain is awake and nothing has been consolidated, saturation and age stay where the last night left them.
+```
+size = initialScale × (1 − age/ttl) ^ 1.2
+```
 
-Once an axon at a permanent cluster is fully thick, further deposits stay capped there. They are not spread across the daytime network.
+Opacity fades over the last part of that life. At the end the thought is recycled and leaves no trace.
 
-A neuron's strength is a blend of its strongest adjacent axon and the mean of its adjacent axons. Neurons above `centerMin` (0.07) are knowledge centers: they can emit counters and host crystals, and they darken from light to deep blue as they strengthen.
+A blue thought and a traveling thought crystallize only while they are still close enough for their current sizes. The meeting distance is the average of the two visible sizes, divided by the 2.2 entry scale, so a freshly emitted pair reaches as far as before, and a shrunken internal thought has to pass closer. That keeps early housing, and the automatic need for sleep, about where they were.
 
-Age is `100 × peakSaturation / 0.8`. It uses the highest saturation ever reached, so a night of consolidation, which concentrates thickness and can lower coverage, never makes the brain younger. The life finishes when peak saturation reaches 80% (within 0.001). The picture holds for 3 seconds, the veil fades in, and a new life begins.
+When nothing is unsettled and no external thought is eligible, no new internal thoughts are created. Whatever is already in flight finishes, and the mind goes quiet.
 
-Growth follows the cosine of the mapped age, with a floor:
+## Lust for learning
+
+The status panel has one slider, **Lust for learning**, from Meditation (0) to Eager (100).
+
+The only resting value is the natural equilibrium:
+
+```
+lustNatural = 100 × (1 − peakSaturation / 0.8)
+```
+
+clamped to 0–100. An empty brain rests near 100. As saturation approaches the 80% end of life, lust rests near 0. Natural lust moves only when saturation moves, and saturation moves only when sleep consolidates thickness, so an awake bout holds lust still.
+
+Dragging the slider forces a value, including exactly 0 or 100. While the pointer is down, the slider follows the finger. On release it eases back toward the moving natural value with time constant `lust.tau` of 3.5 simulated seconds (`1 − e^(−dt/3.5)`), so most of a large gap closes in about 8–12 seconds. It is no longer forced once it is within 0.5 of natural. `setLust` is the same nudge from code. Forcing lust does not change saturation.
+
+Housing chance equals lust/100.
+
+- At 100, a meeting can crystallize, which is as willing as the brain gets. Age acceptance and the border filter still apply.
+- At 0, meditation: thoughts still enter large, flow, shrink, and fade, but housing chance is 0. No temporary home, no hormone wave, no new internal thought. Existing unsettled thoughts may finish their own cycles.
+- In between, both housing and the initial internal response scale with lust.
+
+## Age, growth, and the end
+
+Saturation is the fraction of axon length covered by knowledge. Age is `100 × peakSaturation / 0.8`. Peak saturation never falls, so a night that concentrates wiring cannot make the brain younger.
+
+Thickness deposited in sleep is scaled by growth:
 
 ```
 growth = max(0.2, cos(age × 0.9°) − 0.0001)
 ```
 
-Youth is near 1, so seeds and reinforcement land quickly. The cosine would otherwise only approach zero as age approaches 100, and because age is itself saturation, a pure cosine never quite reaches 80%. The floor of 0.2 keeps late life slow without making the ending unreachable. In an awake-only run the life reaches 80% a little after 1,200 simulated seconds (about 20 minutes) and resets.
+Youth is near 1. The floor of 0.2 keeps late life from stalling forever. Life ends when peak saturation reaches 80% (within 0.001). The picture holds for 3 seconds, the veil fades in, and a new life begins.
 
-### Filters and risk
+Because thickness is sleep-only, a life that sleeps reaches 80% much more slowly than an always-awake sketch used to. A few nights leave the brain still in childhood.
 
-Filter strength rises with life progress (`smoothstep` from 4% to 96% of the way to the 80% limit). Risk affinity falls across the whole life.
+## Life stages
 
-- Young brains explore. They pick unfamiliar routes, seed new axons more often, and accept danger and attraction at the border.
-- Older brains route important thoughts toward axons and centers they already know. Familiar danger and attraction can be recognized and rejected at the border; the recognition still reinforces the matching center, but the thought itself only flashes and fades. Everyday thoughts are not rejected this way.
-- Lifetime shortens slightly with age (`lerp(0.75, 1, risk)`), and the chance of seeding a brand-new axon falls from the young chances (0.12 important, 0.07 everyday) toward 0.10.
+The stage row is read from simulation age, linearly interpolated between the anchors and clamped outside them. Three effects move together: how many outside thoughts are accepted, how much sleep an awake bout earns, and how many temporary thoughts are kept for a permanent home.
 
-## Learning
+| Age | Stage | Sleep / awake | Acceptance | Keep | Tossed |
+| --- | --- | --- | --- | --- | --- |
+| 0 | Infant | 18 / 6 | 1.00 | 0.90 | 10% |
+| 8 | Elementary | 12 / 12 | 0.70 | 0.72 | 28% |
+| 16 | High school | 8 / 16 | 0.48 | 0.55 | 45% |
+| 24 | Young adult | 6 / 18 | 0.34 | 0.42 | 58% |
+| 48 | Adult | 6 / 18 | 0.30 | 0.36 | 64% |
+| 70 and above | Older adult | 5 / 19 | 0.22 | 0.28 | 72% |
 
-The status panel has one control: Learning on or off.
+The temporary-home count that forces sleep is the base threshold (0.38 × 377 ≈ 143) times a stage factor: about 0.45 in infancy, 1 from 24 to 48, and about 1.15 after 48. Infants therefore sleep after fewer temporary homes. Older brains tolerate slightly more, so their awake bouts run longer, and the short sleep ratio then makes the night itself short.
 
-- On: thoughts can seed axons, reinforce them, and crystallize.
-- Off: external thoughts still enter and still trigger counter-thoughts, but nothing stops at a center and no axon thickens. Everything fades at the end of its lifetime or at the boundary.
+## Sleep
 
-`?learn=0` starts the page with learning off.
-
-## Sleep, decided by the brain
-
-There is no awake/sleep switch. The simulation counts temporarily homed crystals and turns that count into a need from 0 to 1:
-
-```
-need = clamp(temporaryCount / threshold, 0, 1)
-threshold = round(0.38 × crystal pool) = 143
-```
-
-The crystal pool holds 377 memories, one per neuron. Sleep begins when need reaches 1, that is when 143 thoughts are sitting in temporary homes, provided the brain has been awake for at least 8 seconds. In a measured run the first sleep starts at about 59 seconds, at age 33.
-
-During sleep:
-
-- no external thoughts enter;
-- internal thoughts continue only from thoughts that are still temporary or traveling, on the same per-thought timer (slightly shorter at night);
-- temporary crystals detach, oldest first, about six per second;
-- each one classifies itself and flies to one of the 21 anchors.
-
-Classification prefers the family that matches the thought (danger, attraction, everyday), and within that choice it joins the category furthest below its weighted share. The seven weights repeat down the three family rows: 0.7, 1.5, 1.0, 1.8, 1.2, 0.6, 1.4. The largest holds about three times the smallest. Distance is only a tie-breaker. During deep sleep, a thought moves from the category furthest over its target to the one furthest under it, and only while that gap is at least one thought. The clusters are not meant to end up the same size.
-
-Each category also has a domain, a circumference around its anchor. Thickness during sleep is applied inside that domain, starting at the anchor. When a neuron there becomes fully thick, the circumference grows to contain it and the adjoining neurons begin to thicken on later sleep steps. Two domains never claim the same neuron; the nearer anchor keeps it. Neurons outside every domain stay bare.
-
-### Orange on the way, light green at home
-
-A detached thought stays orange and doubled in size while it travels. Its speed is three times the daytime speed of the thought that originally arrived (`travelMultiplier` is 3). It steers toward its anchor with a little wobble, and it bounces inside the brain rather than leaving it. A headless run measured the travel speed ratio at 2.999, with zero travelers outside the grid.
-
-On arrival the thought turns light green — bead `#81c784`, pale core `#e8f5e9`, edge `#43a047` — and shrinks back to exactly the regular size of the kind that arrived. Danger stays larger than attraction, which stays larger than an everyday thought; the temporary enlargement is over. The scale eases down in about a quarter of a second. The thought then sits on a golden-angle spiral around the anchor. The anchor is marked with a green dashed ring (`#2e7d32`) that brightens while the brain is asleep. Its internal-thought timer stops.
-
-Thickness moves with the thought, and this is the only moment axons grow. The crystal already carries the thickness it earned during the day. If the temporary site has committed axon strength from an earlier night, a share of that is drained as well (`loss` 0.05, split across the seeded axons; an axon that drops below 0.004 is erased). The permanent anchor receives the carried daytime thickness, the drained strength, and a small consolidation bonus, planted on the axon ends nearest the anchor. Saturation and age can rise from that. They do not rise from the day's traffic. Peak saturation still never falls, so a night that concentrates wiring cannot make the brain younger.
-
-If one cluster gets more than one member ahead of another, the newest settled member detaches and travels to the smaller cluster. Rebalancing repeats every 0.6 seconds until the spread is at most 1. Seeds also drift toward the stronger end of their axon, so knowledge gathers at neurons instead of floating mid-path.
-
-### Waking
-
-REM sleep is the gray phase, while thoughts are still detaching and traveling. Its simulated duration is recorded when that travel is largely finished. Deep sleep, the pale green phase, then lasts the same simulated length, to within one frame (1/60 second). Waking happens at that matched endpoint, not earlier, even if the clusters settled sooner. Any thought still loose at that instant is placed in its weighted category before the screen returns to blue, so deep sleep is never extended and the morning does not begin with travelers still out. `snapshot()` reports `remDuration`, `deepDuration`, `deepTarget`, and `phaseElapsed`.
-
-After waking, the temporary count is 0, so sleep cannot start again until a fresh set of 143 homes accumulates. That takes about 50 seconds of waking life, and `minAwake` is a second guard against an immediate return to sleep. When the pool is full, the oldest settled memories fade to make room for new temporary homes, which is what lets the next night happen.
-
-Each night's gray REM and pale-green deep sleep are the same simulated length. The categories underneath are the weights 0.7, 1.5, 1.0, 1.8, 1.2, 0.6, 1.4, repeated for danger, attraction, and everyday thoughts. A finished night leaves the larger weights with more permanent thoughts than the smaller ones.
-
-## What the background is saying
-
-The background is one radial gradient for the whole screen. It eases toward the color of the current phase over roughly a second and a half to two seconds (`1 − e^(−dt/0.55)`), so a change of phase is a fade rather than a cut. A time jump, such as `?t=`, snaps to the color that moment deserves. The phase and its blend are on `snapshot()` as `phase` and `phaseBlend`.
-
-The cycle, in order:
+There is no awake/sleep control. Need is temporary homes divided by the age-scaled threshold. The background follows the night.
 
 | Phase | Center | Edge | Meaning |
 | --- | --- | --- | --- |
-| `awake` | `#f6fbff` | `#d8eaf7` | Light blue. Freshly awake, need still low. |
-| `sleep-needed` | toward `#fff1f1` | toward `#f6d5d5` | Light red. The blend is the sleep need itself, and it is fully red when need reaches 1, just as sleep starts. |
-| `rem` | `#f4f4f6` | `#e2e2e6` | Light gray. Thoughts are detaching and traveling to permanent homes. The panel says "REM sleep". |
-| `deep` | `#edf8ef` | `#d7eedb` | Pale green, held for the same simulated duration as the REM phase just finished. Clusters finish settling and domains thicken. The panel shows that matched length. |
-| `waking` | back toward `#f6fbff` | back toward `#d8eaf7` | Reorganization is done. Over about two seconds the pale green returns to light blue, and the phase becomes `awake` again. |
+| `awake` | `#f6fbff` | `#d8eaf7` | Light blue. Freshly awake. |
+| `sleep-needed` | toward `#fff1f1` | toward `#f6d5d5` | Light red, in proportion to need. |
+| `rem` | `#f3fbf4` | `#d9f0dc` | Very light green, far paler than the settled beads. First half of the night. |
+| `deep` | `#4f535a` | `#24272d` | Dark gray. Second half. |
+| `waking` | back toward light blue | | About 1.8 seconds, then awake. |
 
-The status panel names the phase. While awake it fills with sleep need. During REM and deep sleep it shows how much of the night's travel is left, along with a line such as "73 settled · 7 traveling · 71 waiting · 21/21 clusters".
+The cycle reads light blue, light red, very light green REM, dark gray deep sleep, light blue. Every change of background eases over about 1.5–2 seconds. As the screen darkens into deep sleep the foreground eases to a brighter night palette (`colors.night`): pale-blue axons and dendrites, light-blue knowledge (`#8fb4ec`), brighter somas and nuclei, brighter counter blue (`#5c9cff`), light-green domain rings (`#9ad7a0`), and a stronger stress wave. None of them are pure white. Awake and REM keep the day palette. Permanent thoughts stay light green (`#81c784`, edge `#43a047`) in every phase.
+
+![REM sleep, very light green](screenshots/rem-light-green.png)
+
+![Deep sleep, dark gray, scattered centers](screenshots/scattered-centers-deep-dark.png)
+
+On sleep onset the brain records the awake bout in simulated time, not wall-clock time. Total sleep is that duration times sleep/awake at the age when sleep begins. REM is the first half and deep sleep is the second half, so deep equals the adjoining REM within one frame (1/60 second). A short infant afternoon is followed by a night about three times as long. An older afternoon is followed by a much shorter night.
+
+At the start of REM each temporary thought, and each thought already in transit, is kept or tossed once, by a stable hash of its identity and the night, using the age's keep chance. Permanent thoughts are never tossed later.
+
+- Tossed thoughts fade during REM. They do not travel, settle, or transfer thickness.
+- Kept thoughts detach, stay orange at 2×, and fly at 3× their daytime speed, bouncing inside the brain. On arrival they turn light green (`#81c784`, edge `#43a047`) and shrink to exactly 1× the kind's regular size. The scale eases over about a quarter of a second. Thickness moves with them: the carried daytime amount, a small drain from the temporary site, and a consolidation bonus, planted inside that category's domain.
+
+If work is unfinished when deep sleep ends, the remaining kept thoughts are placed and the categories are balanced on that frame. Deep sleep is not extended.
+
+## Twenty-one uneven categories
+
+The same seven weights repeat down each family:
+
+```
+0.7, 1.5, 1.0, 1.8, 1.2, 0.6, 1.4
+```
+
+The largest holds about three times the smallest. Classification prefers the matching family, then the category furthest below its weighted share. During deep sleep, thoughts move from the category furthest over its target to the one furthest under it. The clusters are not meant to end up the same size.
+
+## Domains
+
+Each category starts as a small circumference around its scattered anchor, small enough that the ring does not already cover a neighboring center. Larger weights start a little wider. During sleep, thickness is fed to the least-thick neuron inside the domain. When a neuron becomes fully thick, the circumference grows to contain it and adjoining neurons that are nearer to this anchor than to any other begin to thicken on later sleep steps. Domains do not share a neuron. Neurons outside every domain are not the target of that deposit. All of this waits for sleep. Daytime crossings do not thicken axons, plant seeds, or move saturation.
 
 ## Visual legend
 
 | Mark | Meaning |
 | --- | --- |
-| Deep red bead | Danger, still traveling |
-| Magenta bead | Attraction, still traveling |
-| Pale pink bead | Everyday thought, still traveling |
-| Small blue bead | Counter-thought |
-| Large orange bead | Temporarily homed, or traveling to a permanent cluster (2×) |
-| Light green bead, regular size | Settled in a permanent cluster (1× its kind) |
-| Green dashed ring | One of the 21 anchors |
-| Dark blue axon segment | Knowledge. Longer and darker means stronger. |
-| Light blue background | Awake, or just waking |
-| Light red background | Sleep needed badly |
-| Light gray background | REM sleep, thoughts traveling |
-| Pale green background | Deep sleep, clusters settling |
+| Large red, magenta, or pink bead | A thought that just entered. It shrinks as it travels. |
+| Tiny fading bead | A thought becoming insignificant. |
+| Bead that collapses in under 0.4 s | Border rejection. No home, no wave. |
+| Large orange bead | Temporary home, or traveling to a cluster, at 2×. |
+| Light green bead, regular size | Permanent home, at 1×. |
+| Warm gold-rose ring | Reward response. A metaphor for a dopamine-like pulse when attraction finds a temporary home. |
+| Crimson-violet ring | Stress response. A metaphor for an adrenaline/cortisol-like pulse when danger finds a temporary home. Not one hormone. |
+| Blue bead, large or small | Internal counter-thought. Born at the trigger's size, then shrinking to nothing. |
+| Green dashed ring | A category domain. |
+| Dark blue axon | Knowledge. Only grows in sleep. |
+| Light blue, light red, very light green, dark gray background | Awake, sleep-needed, REM, deep sleep. |
 
-## Controls and parameters
+## Controls, URL, and `window.__life`
 
-The only radio control is Learning on/off.
-
-URL parameters:
+The control box starts hidden. A **Show controls** button at the top left opens it; **Hide** closes it again. That choice is remembered in `paperLife.hudHidden`. The life keeps running while the box is closed, and the panel refreshes as soon as it is opened. Inside the box, the only setting is the lust slider.
 
 | Parameter | Effect |
 | --- | --- |
-| `t=N` | Start N simulated seconds into a life. Sleep will already have happened if N is past a threshold. |
+| `t=N` | Seek N simulated seconds into a life. |
 | `still=1` | Draw that frame and do not animate. |
-| `learn=0` | Start with learning off. |
-| `diag=1` | Write `stats()` JSON into a hidden `<pre id="diag">`. |
+| `lust=N` | Start with lust forced to N (0–100). It then slides home. With `t`, the seek runs at that forced value. |
+| `hud=1` | Show the control box for this load. Overrides the saved choice. |
+| `hud=0` | Hide the control box for this load. Overrides the saved choice. |
+| `diag=1` | Write `stats()` JSON into `<pre id="diag">`. |
+| `bench=1` | Time 48 frames on a busy scene. Reports average ms, p95 ms, and the Paper item count. |
 
-`sleep` and `nap` are not parameters. Sleep is automatic, so those names do nothing.
-
-`window.__life` exposes:
+`sleep`, `nap`, and `learn` are not parameters.
 
 | Method | Effect |
 | --- | --- |
-| `seek(seconds)` | Reset and run forward to that time. |
-| `resume(seconds)` | Run forward from the current time. |
+| `seek(seconds)` | Reset and run forward. |
+| `resume(seconds)` | Run forward from now. |
 | `freeze(on)` | Stop or resume the animation clock. |
-| `setLearning(on)` | Learning on or off. |
-| `time()` | Current simulated time. |
-| `stats()` | Saturation, age, sleep need, cluster sizes, travel speed ratio, and the other counters. |
+| `setLust(0–100)` | Force lust, then let it ease back. |
+| `holdLust(value)` / `releaseLust()` | What the slider does while the pointer is down, and when it lifts. |
+| `time()` | Simulated time. |
+| `stats()` | Saturation, age, stage, lust, housing chance, sleep lengths, waves, fast rejections, insignificant fades, temporary homes, cluster sizes, domains. |
 
-Reduced motion starts the page frozen at 55 seconds unless `t` is set.
+A backgrounded tab cannot fast-forward the life. Each frame advances at most 0.05 simulated seconds.
+
+Stats worth knowing: `fastRejectedThoughts`, `insignificantFades`, `temporarilyHoused` (the same count as crystallizations), `rewardWaves`, `stressWaves`, `activeWaves`, `lust`, `lustNatural`, `lustForced`, `housingChance`, `ageStage`, `sleepAwakeRatio`, `acceptance`, `keepChance`, `awakeDuration`, `sleepTarget`, `remDuration`, `deepDuration`, `keptThisSleep`, `tossedThisSleep`.
 
 ## Files
 
 | File | Owns |
 | --- | --- |
-| `index.html` | The canvas, the status panel, the script order. |
-| `styles.css` | The panel, the sleep-need bar, the between-lives veil. |
-| `js/config.js` | Every tunable number and color. |
-| `js/util.js` | `clamp`, `lerp`, `smoothstep`, `hash`, `mulberry32`. |
-| `js/network.js` | The 377 neurons, the axons, the 21 anchors. |
-| `js/simulation.js` | Thoughts, counters, crystals, saturation, age, and the sleep cycle. |
-| `js/renderer.js` | Paper.js drawing. Grid units in, pixels out. |
-| `js/hud.js` | The status panel and the Learning control. |
-| `js/main.js` | Setup, resize, URL parameters, `window.__life`. |
+| `index.html` | Canvas, status panel, lust slider, script order. |
+| `styles.css` | Panel, sleep-need bar, slider, veil. |
+| `js/config.js` | Grid, pools, stages, lust, waves, colors, sleep, kinds. |
+| `js/util.js` | `clamp`, `lerp`, `smoothstep`, deterministic `hash`. |
+| `js/network.js` | Neurons, Bézier axons, anchors. No behavior. |
+| `js/simulation.js` | The life. No Paper.js. |
+| `js/renderer.js` | Pixels only. Reads the snapshot and the pools. |
+| `js/hud.js` | The panel. |
+| `js/main.js` | Setup, URL parameters, frame cap, bench hook. |
 
-Each script attaches to `window.PaperLife` and is wrapped so it can also be loaded under Node's `vm` for headless checks. The model never reads the viewport. `renderer.js` is the only file that knows about pixels.
+## Performance
+
+The hot cost was not drawing. It was, during sleep, every settled crystal scanning every crystal to count its cluster, 60 times a second. That scan is now a counter updated when a thought settles, leaves, or is moved. Saturation and neuron strength are recomputed only after an axon actually changes, which is during sleep; an awake bout does not walk all 1,048 edges. Paper items are pooled (thoughts, counters, crystals, waves) and hidden with `visible = false`. Thick axons are restyled only when their coverage changes. The frame catch-up is capped.
+
+Measured on this machine, same life, Node, direct script load:
+
+| Run | ms per simulated second |
+| --- | --- |
+| Before those two changes, 120 s | 7.93 |
+| After, 120 s | 4.78 |
+| After, 300 s | 3.59 |
+
+The checkpoints at 30, 60, and 120 seconds match exactly across that change (saturation, crystallizations, settled count, strength, phase). Headless Chrome, 48 frames after 12 simulated seconds, at 1440×900: average 0.285 ms, p95 0.6 ms, 5,904 Paper items. That count is fixed: one path per axon, per neuron part, per pooled thought, counter, crystal, and wave.
+
+An earlier profile of a previous build that accepted thoughts at a flat rate, before age acceptance, cost about 18 ms per simulated second over 300 seconds. That number is not comparable one-to-one, because the current life accepts fewer thoughts as it ages and therefore does less work. The 7.93 to 4.78 comparison is the one that holds the behavior fixed.
 
 ## Tuning
 
-All of these live in `js/config.js`.
-
-| Key | Value | Role |
+| Constant | Value | Role |
 | --- | --- | --- |
-| `cols`, `rows` | 29 × 13 | 377 neurons |
-| `pools.crystals` | 377 | Memory. Oldest settled memories fade when it is full. |
-| `life.saturationLimit` | 0.8 | The life ends here. |
-| `life.growthFloor` | 0.2 | Late-life learning. Stops the cosine from stalling below 80%. |
-| `spawnRate` | 11 / s | External thoughts while awake. |
-| `internal.intervalMin`, `intervalMax` | 2.5 s, 5.5 s | How often one unsettled thought provokes an internal thought. |
-| `internal.sleepScale` | 0.72 | Shorter wait during sleep. Sleep itself emits nothing. |
-| `sleep.needThreshold` | 0.38 | Share of the pool that forces sleep. 143 thoughts. |
-| `sleep.wakeResidue` | 2 | Temporary homes still allowed at waking. |
-| `sleep.minAwake`, `minSleep` | 8 s, 3 s | Hysteresis. The cycle cannot flicker. |
-| `sleep.migrationRate` | 6 / s | How fast temporary homes detach. |
-| `sleep.travelMultiplier` | 3 | Night travel versus daytime speed. |
-| `sleep.deposit` | 0.36 | Thickness carried by a temporary home and applied at its permanent cluster during sleep. Everyday thoughts carry 0.45 of this. |
-| `crystalScale` | 2 | Homed and settled beads versus the arriving thought. |
-| `learning.reinforce` | 0.18 | Strength added when a thought crosses its seed. |
-| `learning.thickSlowdown` | 0.45 | Speed on a fully learned axon. |
-| `learning.rejectMin`, `rejectMax` | 0.15, 0.55 | Border rejection of familiar danger and attraction. |
+| `entryScale`, `fadeScale`, `shrinkPower` | 2.2, 0.15, 1.35 | Traveler size from entry to fade. |
+| `rejectTtlMin`, `rejectTtlMax` | 0.22, 0.38 | Fast rejection collapse. |
+| `crystalScale` | 2 | Temporary and traveling homes. Permanent homes draw at 1×. |
+| `spawnRate` | 11 / s | Before age acceptance. |
+| `lust.tau` | 3.5 s | Return from a forced lust. |
+| `life.saturationLimit` | 0.8 | End of life. |
+| `life.growthFloor` | 0.2 | Late-life learning floor. |
+| `sleep.needThreshold` | 0.38 | Base share of the pool that forces sleep, then scaled by stage. |
+| `sleep.travelMultiplier` | 3 | Sleep flight versus daytime speed. |
+| `sleep.deposit` | 0.72 | Thickness carried into the permanent domain. Everyday thoughts carry 0.45 of this. |
+| `waves.pool` | 16 | Reward and stress waves. |
+| `waves.ttlMin`, `ttlMax` | 0.9, 1.3 | Wave lifetime. |
+| Category weights | 0.7 … 1.4 | Repeated for each of the three families. |
 
-## Known limits
+## Known limitations
 
-Reaching 80% takes about 20 simulated minutes in an awake-only run, and longer when nights are included, because a night concentrates thickness and pauses external learning. Age never falls, because it follows peak saturation. The growth floor is what makes the ending reachable; without it the cosine and the saturation-derived age approach 80% and never arrive.
+A full life to 80% saturation takes a long time, because axons thicken only while the brain sleeps and each night only consolidates what the day managed to house. Two or three nights leave the brain near the end of childhood, not at the end of life. Domains expand only after a neuron is actually full, so early nights thicken the core of a category more than they grow its circumference. The hormone waves are metaphors. The lust equilibrium is a function of saturation, not of mood, time of day, or anything measured in a person.
