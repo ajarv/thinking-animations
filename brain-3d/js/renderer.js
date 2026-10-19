@@ -115,6 +115,7 @@
       point: [16, 28],
       fillColor: colors.text,
       fontSize: 13,
+      leading: 18,
       fontFamily: 'Georgia, serif',
       content: ''
     });
@@ -169,7 +170,9 @@
       center: new paper.Color(colors.bgCenter),
       edge: new paper.Color(colors.bgEdge),
       dark: 0,
-      time: null
+      time: null,
+      token: '',
+      paintTime: null
     };
 
     function hexColor(color) {
@@ -227,16 +230,28 @@
     }
 
     function updateMood() {
-      const target = moodTarget();
       const dt = mood.time === null ? Infinity : simulation.time - mood.time;
       mood.time = simulation.time;
-      const k = dt < 0 || dt > 0.5 ? 1 : 1 - Math.exp(-dt / 0.55);
-      mood.center = mixColor(mood.center, target.center, k);
-      mood.edge = mixColor(mood.edge, target.edge, k);
       const darkTarget = simulation.phase === 'deep' ? 1
         : simulation.phase === 'waking' ? 1 - (simulation.phaseBlend || 0)
         : 0;
-      mood.dark += (darkTarget - mood.dark) * k;
+      const k = dt < 0 || dt > 0.5 ? 1 : 1 - Math.exp(-dt / 0.55);
+      const nextDark = mood.dark + (darkTarget - mood.dark) * k;
+      // Restyling every axon is visible work. Steady phases and unchanged
+      // saturation reuse the last colors; transitions still step smoothly.
+      const token = simulation.phase + ':' +
+        Math.round((simulation.phaseBlend || 0) * 40) + ':' +
+        Math.round(nextDark * 40) + ':' +
+        simulation.stats.saturated;
+      mood.dark = nextDark;
+      if (token === mood.token) return;
+      const paintDt = mood.paintTime === null ? Infinity : simulation.time - mood.paintTime;
+      mood.paintTime = simulation.time;
+      mood.token = token;
+      const paintK = paintDt < 0 || paintDt > 0.5 ? 1 : 1 - Math.exp(-paintDt / 0.55);
+      const target = moodTarget();
+      mood.center = mixColor(mood.center, target.center, paintK);
+      mood.edge = mixColor(mood.edge, target.edge, paintK);
       background.fillColor = {
         gradient: {
           stops: [hexColor(mood.center), hexColor(mood.edge)],
@@ -398,15 +413,18 @@
     }
 
     function statusText(includePerformance) {
-      let text = stats.neurons + ' neurons · ' + simulation.phase +
-        sensationLabel() + ' · ' +
-        stats.temporaryHomes + ' housed · ' + stats.activeThoughts + ' moving · ' +
-        simulation.stats.saturated + '/' + simulation.schwannTotal + ' saturated';
+      const blocked = simulation.stats.saturated;
+      const total = simulation.schwannTotal;
+      const pct = total ? 100 * blocked / total : 0;
+      const percent = pct < 10 ? pct.toFixed(1) : String(Math.round(pct));
+      let detail = stats.temporaryHomes + ' housed · ' + stats.activeThoughts +
+        ' moving · ' + blocked + '/' + total + ' · ' + percent + '% saturated';
       if (includePerformance) {
-        text += ' · ' + stats.avgMs.toFixed(2) + ' ms update · ' +
+        detail += ' · ' + stats.avgMs.toFixed(2) + ' ms · ' +
           stats.fps.toFixed(0) + ' fps';
       }
-      return text;
+      return stats.neurons + ' neurons · ' + simulation.phase + sensationLabel() +
+        '\n' + detail;
     }
 
     function draw(dt) {

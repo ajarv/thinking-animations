@@ -59,7 +59,7 @@ Then open `http://127.0.0.1:8123/`.
 
 ## Performance readout
 
-The line at the top left shows the neuron, axon, Schwann-cell, domain, moving-thought, and temporary-home counts, plus the average scene-update time and measured frames per second. It refreshes every half second.
+The top left shows the phase and sensation state on the first line. The second line shows housed thoughts, moving thoughts, blocked Schwann cells over the total, the saturation percentage, and the scene-update time. It refreshes every half second.
 
 Other URL options:
 
@@ -70,16 +70,16 @@ Headless Chrome at 1280 by 800, 144 neurons and 245 axons, measured over 600 fra
 
 | | Average | 95th percentile |
 |---|---|---|
-| Scene update | 0.69 ms | 0.90 ms |
-| Update plus canvas draw | 2.95 ms | 3.70 ms |
+| Scene update | 0.67 ms | 0.90 ms |
+| Update plus canvas draw | 2.74 ms | 3.50 ms |
 
-That remains well under the 16.7 ms budget for 60 frames per second. The benchmark created one cohort and one temporary home while its Paper-item count stayed fixed at 1,831.
+That remains well under the 16.7 ms budget for 60 frames per second. Axon and neuron colors are repainted only when the sleep mood or the saturated-cell count changes. The benchmark kept the Paper-item count fixed at 1,837.
 
 ## Files
 
 - `index.html` loads Paper.js 0.12.17 and the scripts.
 - `js/config.js` holds the network, brain-shape, domain, thought, camera, color, and timing settings.
 - `js/skeleton.js` builds the brain surface, graph adjacency, shared zigzag edge geometry, and 13 domain centers.
-- `js/simulation.js` runs external entry, three-center internal bursts, graph travel, shrinking, 3D collision, and temporary housing with pooled state.
+- `js/simulation.js` runs inbound sensations, size-based internal bursts, graph travel, half-life fading, housing, and clockwise Schwann saturation with pooled state.
 - `js/renderer.js` creates all Paper items once, then projects and depth-sorts neurons and beads while reusing the shared edge geometry.
 - `js/main.js` advances the simulation at fixed 1/60-second steps and provides bench and deterministic still modes.

@@ -120,7 +120,7 @@
       // Fraction of each cell slot left empty between neighboring cells.
       gapRatio: 0.22,
       strokeWidth: 2.2,
-      saturatedStrokeWidth: 4,
+      saturatedStrokeWidth: 5.5,
       // Lateral step of the zigzag, in skeleton units, capped by axon length.
       zigzag: 0.022,
       zigzagLength: 0.16
