@@ -307,14 +307,11 @@
       saturation: 0,
       age: 0,
       rotationTurns: 0,
-      cognitiveLoad: 0,
-      baseRotationDps: spinCfg.minDegreesPerSecond,
       rotationDps: spinCfg.minDegreesPerSecond,
-      timeMultiplier: 1,
       yearsPerMinute: spinCfg.minDegreesPerSecond *
         spinCfg.yearsPerRotation / 360 * 60,
       lifeComplete: false,
-      threshold: config.sleep.anchors[0].u,
+      threshold: config.sleep.onsetHomes,
       calculatedRemSeconds: 0,
       deepTargetSeconds: 0,
       external: external,
@@ -1007,35 +1004,11 @@
       return active;
     }
 
-    function cognitiveLoad() {
-      let load = 0;
-      for (let i = 0; i < internals.length; i++) {
-        const item = internals[i];
-        if (!item.active) continue;
-        load += clamp(item.scale / item.startScale, 0, 1);
-      }
-      for (let i = 0; i < homes.length; i++) {
-        if (homes[i].active && homes[i].state === 'migrating') {
-          load += spinCfg.remMigrationWeight;
-        }
-      }
-      return load;
-    }
-
     function updateLifeClock(dt) {
       const fill = saturationFill();
-      const base = spinCfg.minDegreesPerSecond +
+      const dps = spinCfg.minDegreesPerSecond +
         (spinCfg.maxDegreesPerSecond - spinCfg.minDegreesPerSecond) *
           Math.pow(fill, spinCfg.accelerationPower);
-      const load = cognitiveLoad();
-      const multiplier = Math.max(
-        spinCfg.minTimeMultiplier,
-        1 / (1 + spinCfg.loadCoefficient * load)
-      );
-      const dps = base * multiplier;
-      state.cognitiveLoad = load;
-      state.baseRotationDps = base;
-      state.timeMultiplier = multiplier;
       state.rotationDps = state.lifeComplete ? 0 : dps;
       state.yearsPerMinute = state.rotationDps *
         spinCfg.yearsPerRotation / 360 * 60;
@@ -1095,10 +1068,7 @@
       state.unsettled = countHomes(function (home) {
         return home.state === 'temporary' || home.state === 'migrating';
       });
-      state.threshold = Math.max(
-        firstAnchor.u,
-        Math.round(firstAnchor.u * state.crystallized / config.categories.count)
-      );
+      state.threshold = sleep.onsetHomes;
       state.need = state.threshold > 0 ? clamp(state.unsettled / state.threshold, 0, 1) : 0;
     }
 

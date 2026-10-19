@@ -431,7 +431,6 @@
       const percent = pct < 10 ? pct.toFixed(1) : String(Math.round(pct));
       let detail = stats.temporaryHomes + ' housed · ' + stats.activeThoughts +
         ' moving · ' + blocked + '/' + total + ' · ' + percent + '% saturated' +
-        ' · load ' + simulation.cognitiveLoad.toFixed(1) +
         ' · ' + simulation.yearsPerMinute.toFixed(1) + ' years/min';
       if (includePerformance) {
         detail += ' · ' + stats.avgMs.toFixed(2) + ' ms · ' +

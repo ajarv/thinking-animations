@@ -10,7 +10,7 @@ The first stage builds the skeleton:
 - Each neuron connects to its three nearest neighbors. With 144 neurons that gives 245 axons in one connected network.
 - Every axon is drawn as five pronounced, rounded Schwann-cell segments with small gaps: 1,225 visible cells at the default settings. The cells step sideways in a small seeded zigzag instead of sitting on a straight line. The kink is in the skeleton, so it turns with the brain.
 - Thirteen thought-domain centers are scattered across the surface with the 2D rule: the same seeded shuffle, then the widest separation that still fits all thirteen. They split into families of 5, 4, and 4, with the repeating weights 0.7, 1.5, 1.0, 1.8, 1.2, 0.6, and 1.4. Each center is marked by a green ring. Every other neuron belongs to the nearest center.
-- One complete turn represents ten years of life, so the ten turns from age 0 to 100 take about three minutes. The rotation is deliberately slow in youth and accelerates as the brain fills.
+- One complete turn represents ten years of life, so the ten turns from age 0 to 100 take about six and a half minutes. The rotation is deliberately slow in youth and accelerates as the brain fills.
 - Colors match the awake 2D brain: a light blue radial background, pale blue somas with a dark blue edge, small light nuclei at 0.42 of the soma radius, and blue Schwann cells.
 
 ## External and internal thoughts
@@ -32,23 +32,35 @@ One deterministic cohort runs at a time:
 
 External sensations are scheduled every ten real seconds while awake. The existing single-cohort pool delays an arrival if the previous cohort has not finished, and sleep shuts arrivals down. Once saturation reaches 45%, a largest-band sensation has a seeded 20% chance to become an extreme-distress response, adding a Fibonacci burst of 3, 5, or 8 internal thoughts up to the 13-thought cap.
 
-## Thought-driven life clock
+## Saturation-driven life clock
 
-Age belongs to the simulation rather than being inferred from saturation. One turn is ten years, using `age += rotationDegrees / 36`. With normalized fullness `f = saturation / 0.84`, the toilet-roll base speed is `12 + 328 × f^1.35` degrees per second.
+Age belongs to the simulation rather than being inferred from saturation. One turn is ten years, using `age += rotationDegrees / 36`. Normalized fullness is `f = saturation / 0.84`.
 
-Active thought load slows that base speed by `max(0.16, 1 / (1 + 0.35 × load))`. Each traveling internal thought contributes its remaining relative size; a thought migrating during REM contributes half. Five full-sized thoughts reduce time to about 36% of its unloaded speed, and thirteen reduce it to about 18%. Thus youth runs slowly because sensations trigger many thoughts, later life accelerates as saturation rises and receptivity falls, and a rare adult distress burst visibly slows life again.
+Rotation speed is driven only by saturation: `3 + 13.15 × f^4` degrees per second, from 3° per second in an empty brain to 16.15° per second at the ceiling. Internal-thought count, size, sleep phase, and distress do not alter the clock; speed steps up only when a permanent thought crystallizes more Schwann cells.
+
+Nights and sensations stay on the wall clock. The seeded life reaches 80% saturation at age 47 and age 100 at about 383 seconds:
+
+| Age | Seconds | Saturation | Speed |
+|---|---|---|---|
+| 10 | 107 | 48% | 4.4°/s |
+| 20 | 175 | 64% | 7.5°/s |
+| 30 | 212 | 76% | 11.8°/s |
+| 50 | 271 | 83% | 15.7°/s |
+| 100 | 383 | 84% | 16.1°/s |
+
+Schwann cells crystallize only in REM, so saturation rises in steps, one per night. The first night, around age 3, crystallizes three young thoughts with 144, 89, and 89 cells, about 26% of the brain.
 
 ![An orange double-sized temporary home](screenshots/temporary-home.png)
 
 ## Sleep cycle
 
-The night uses the 2D duration rule. Five unsettled homes start an 18-hour night; more unsettled homes shorten it along the 8-hour, 13-hour, and 4-hour anchors, and crystallized homes can only shorten it further. One simulated second represents two hours.
+Sleep starts as soon as three thoughts are temporarily housed (`sleep.onsetHomes`). The night length uses the 2D duration rule: up to five unsettled homes give an 18-hour night; more unsettled homes shorten it along the 8-hour, 13-hour, and 4-hour anchors, and crystallized homes can only shorten it further. Each simulated hour lasts half a second, so an 18-hour night takes 9 seconds.
 
 - Fresh awake is a soft morning blue. Sensations are dusty rose, internal thoughts are periwinkle, and temporary homes are apricot.
 - Overloaded warms the room toward peach as temporary homes approach the sleep threshold.
 - Winding down is pale lilac. No new sensation starts, while a sensation already traveling can still find a temporary home.
 - REM sleep is a soft sage. It lasts at least half the calculated night, and longer if a temporary home is still walking to its domain center. Those homes travel at three times the daytime speed, then settle sage at their regular size.
-- As each thought reaches its permanent home, it blocks a Fibonacci-sized group of Schwann cells, which turn honey yellow. At low saturation it can claim 34 cells; the largest allowed group falls through 21, 13, 8, 5, 3, 2, and 1 as saturation grows. Selection proceeds clockwise from the permanent-home neuron and expands through neighboring neurons when the local cells are full.
+- As each thought reaches its permanent home, it blocks a Fibonacci-sized group of Schwann cells, which turn honey yellow. At low saturation it can claim 144 cells; the largest allowed group falls through 89, 55, 34, 21, 13, 8, 5, 3, 2, and 1 as saturation grows. Selection proceeds clockwise from the permanent-home neuron and expands through neighboring neurons when the local cells are full.
 - Deep sleep is a calm indigo and lasts exactly the calculated half, even when REM ran longer. The neurons lighten so they stay visible, and no new thoughts or sensations begin.
 - Waking eases from indigo back to morning blue.
 - Saturation is the blocked Schwann cells divided by every Schwann cell, with an 84% working ceiling for the speed and receptivity curves. Each permanent thought still claims the saturation-dependent Fibonacci block described above; age advances independently through rotation.
@@ -68,7 +80,7 @@ Then open `http://127.0.0.1:8123/`. The Pause button at the bottom right freezes
 
 ## Performance readout
 
-The top left shows age, phase, and sensation state on the first line. The second line shows housed thoughts, moving thoughts, blocked Schwann cells, saturation, current cognitive load, represented years per minute, and scene-update time. It refreshes every half second.
+The top left shows age, phase, and sensation state on the first line. The second line shows housed thoughts, moving thoughts, blocked Schwann cells, saturation, represented years per minute, and scene-update time. It refreshes every half second.
 
 Other URL options:
 
@@ -89,6 +101,6 @@ That remains well under the 16.7 ms budget for 60 frames per second. Axon and ne
 - `index.html` loads Paper.js 0.12.17 and the scripts.
 - `js/config.js` holds the network, brain-shape, domain, thought, camera, color, and timing settings.
 - `js/skeleton.js` builds the brain surface, graph adjacency, shared zigzag edge geometry, and 13 domain centers.
-- `js/simulation.js` runs the thought-driven life clock, inbound sensations, saturation-dependent internal bursts, seeded distress events, graph travel, second-half-life fading, housing, and clockwise Schwann saturation with pooled state.
+- `js/simulation.js` runs the saturation-driven life clock, inbound sensations, saturation-dependent internal bursts, seeded distress events, graph travel, second-half-life fading, housing, and clockwise Schwann saturation with pooled state.
 - `js/renderer.js` creates all Paper items once, then projects and depth-sorts neurons and beads while reusing the shared edge geometry.
 - `js/main.js` advances the simulation at fixed 1/60-second steps and provides bench and deterministic still modes.

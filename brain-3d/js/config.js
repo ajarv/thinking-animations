@@ -55,16 +55,13 @@
     },
     spin: {
       // Ten rotations make a 100-year life. Saturation accelerates the
-      // toilet-roll clock; active thoughts temporarily slow it.
+      // toilet-roll clock from a fixed minimum to a fixed maximum.
       yearsPerRotation: 10,
-      minDegreesPerSecond: 12,
-      // The high ceiling is approached only near 84% saturation. In the
-      // seeded three-minute life the observed peak is about 54 degrees/s.
-      maxDegreesPerSecond: 340,
-      accelerationPower: 1.35,
-      loadCoefficient: 0.35,
-      minTimeMultiplier: 0.16,
-      remMigrationWeight: 0.5,
+      // Half of the previous curve. Saturation still sets the speed; nights
+      // and sensations stay on the wall clock, so a life now lasts longer.
+      minDegreesPerSecond: 3,
+      maxDegreesPerSecond: 16.15,
+      accelerationPower: 4,
       maxAge: 100,
       targetLifetimeSeconds: 180
     },
@@ -108,7 +105,9 @@
       text: '#3e5878'
     },
     sleep: {
-      secondsPerHour: 2,
+      secondsPerHour: 0.5,
+      // Sleep starts once this many thoughts are temporarily housed.
+      onsetHomes: 3,
       needPhase: 0.2,
       wakeBlend: 1.8,
       migrationSpeed: 1.02,
@@ -194,11 +193,11 @@
       },
       saturation: {
         // Select the largest Fibonacci block below the saturation-dependent
-        // ideal. The calibrated age curve maps 80% saturation to age 50.
-        fibonacci: [1, 2, 3, 5, 8, 13, 21, 34],
-        maxBlock: 34,
+        // ideal. A short life has only a few nights, so blocks are large.
+        fibonacci: [1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144],
+        maxBlock: 144,
         ceiling: 0.84,
-        blockPower: 1.15
+        blockPower: 0.5
       }
     }
   };
