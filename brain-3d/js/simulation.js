@@ -77,10 +77,10 @@
     // cell farther from the neuron and walks around again.
     const schwannCount = config.schwann.cellsPerAxon;
     const blockCounts = cfg.saturation.blockCounts;
-    const averageBlock = blockCounts.reduce(function (sum, count) {
-      return sum + count;
-    }, 0) / blockCounts.length;
-    const saturationCapacity = cfg.maxHomes * averageBlock;
+    const schwannTotal = edges.length * schwannCount;
+    const maxInternals = cfg.external.sizes.reduce(function (max, band) {
+      return Math.max(max, band.internals);
+    }, 1);
     const saturatedSchwann = edges.map(function () {
       return new Array(schwannCount).fill(false);
     });
@@ -162,11 +162,13 @@
       hitT: 0,
       hit: null,
       receivedAt: -1,
+      startScale: 1,
+      internalCount: 0,
       serial: 0
     };
 
     const internals = [];
-    for (let i = 0; i < cfg.internalCount; i++) {
+    for (let i = 0; i < maxInternals; i++) {
       internals.push({
         active: false,
         age: 0,
@@ -228,6 +230,7 @@
       internals: internals,
       homes: homes,
       saturatedSchwann: saturatedSchwann,
+      schwannTotal: schwannTotal,
       stats: {
         cohorts: 0,
         housed: 0,
@@ -252,7 +255,7 @@
         if (saturatedSchwann[candidate.edge][candidate.cell]) continue;
         saturatedSchwann[candidate.edge][candidate.cell] = true;
         state.stats.saturated++;
-        state.saturation = clamp(state.stats.saturated / saturationCapacity, 0, 1);
+        state.saturation = state.stats.saturated / schwannTotal;
         state.stats.latestSaturated = {
           node: nodeId,
           edge: candidate.edge,
@@ -388,15 +391,19 @@
       if (item.active) placeOnRoute(item);
     }
 
-    function pickCenters() {
+    function pickCenters(count) {
       const order = anchors.map(function (_, index) { return index; });
-      for (let i = 0; i < cfg.internalCount; i++) {
+      for (let i = 0; i < count; i++) {
         const j = i + Math.floor(rng() * (order.length - i));
         const swap = order[i];
         order[i] = order[j];
         order[j] = swap;
       }
-      return order.slice(0, cfg.internalCount);
+      return order.slice(0, count);
+    }
+
+    function halfLifeScale(startScale) {
+      return startScale * cfg.halfLife;
     }
 
     function spawnInternal(item, category, targetStep, cohortSerial) {
@@ -409,7 +416,9 @@
         routeLength(external.route, edges, targetStep) -
           external.progress * edges[external.route[0].edge].length
       );
-      const arrival = externalDistance / cfg.external.speed;
+      const halfAt = external.ttl * (1 - Math.pow(cfg.halfLife, 1 / cfg.external.shrinkPower));
+      const relevantFor = Math.max(0.45, halfAt - external.age);
+      const arrival = Math.min(externalDistance / cfg.external.speed, relevantFor);
       const internalDistance = routeLength(route, edges);
       const variation = 0.92 + rng() * 0.16;
       const desiredSpeed = internalDistance / Math.max(0.5, arrival) * variation;
@@ -636,10 +645,15 @@
         return;
       }
       placeOnRoute(external);
-      const sources = pickCenters();
+      const count = external.internalCount;
+      const sources = pickCenters(count);
       state.stats.latestSources = sources.slice();
       const routeLast = Math.max(1, external.route.length - 1);
       for (let i = 0; i < internals.length; i++) {
+        if (i >= count) {
+          internals[i].active = false;
+          continue;
+        }
         const target = Math.min(routeLast, 4 + i * 4 + Math.floor(rng() * 3));
         spawnInternal(internals[i], sources[i], target, external.serial);
       }
@@ -654,12 +668,16 @@
       const outwardY = z;
       const outwardZ = ring * Math.sin(theta);
       const distance = shellRadius + cfg.external.approachGap;
+      const band = cfg.external.sizes[Math.floor(rng() * cfg.external.sizes.length)];
+      const startScale = band.scaleMin + rng() * (band.scaleMax - band.scaleMin);
       external.active = true;
       external.accepted = false;
       external.state = 'approaching';
       external.age = 0;
       external.ttl = cfg.external.ttl;
-      external.scale = cfg.external.entryScale;
+      external.startScale = startScale;
+      external.internalCount = band.internals;
+      external.scale = startScale;
       external.speed = cfg.external.speed;
       external.route = [];
       external.routeIndex = 0;
@@ -694,10 +712,10 @@
       external.scale = fadeScale(
         external.age,
         external.ttl,
-        cfg.external.entryScale,
+        external.startScale,
         cfg.external.shrinkPower
       );
-      if (external.age >= external.ttl) {
+      if (external.scale < halfLifeScale(external.startScale) || external.age >= external.ttl) {
         external.active = false;
         external.state = 'faded';
         state.stats.externalFaded++;
@@ -739,7 +757,7 @@
         if (!item.active) continue;
         item.age += dt;
         item.scale = fadeScale(item.age, item.ttl, item.startScale, item.shrinkPower);
-        if (item.age >= item.ttl) {
+        if (item.scale < halfLifeScale(item.startScale) || item.age >= item.ttl) {
           item.active = false;
           state.stats.internalFaded++;
           continue;

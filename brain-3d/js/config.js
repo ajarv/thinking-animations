@@ -130,7 +130,8 @@
       spawnDelay: 1.25,
       collisionScale: 1.35,
       routeEdges: 36,
-      internalCount: 3,
+      // A fresh thought loses relevance below half its own starting size.
+      halfLife: 0.5,
       maxHomes: 48,
       external: {
         ttl: 12,
@@ -143,7 +144,13 @@
         contactRadius: 0.22,
         // Received rests on the strand, then acceptance starts mesh travel.
         receiveHold: 0.65,
-        entryScale: 3.4,
+        // Larger bands launch more internal thoughts. Ranges do not overlap.
+        sizes: [
+          { scaleMin: 4.4, scaleMax: 5.4, internals: 5 },
+          { scaleMin: 3.3, scaleMax: 4.1, internals: 3 },
+          { scaleMin: 2.4, scaleMax: 3.1, internals: 2 },
+          { scaleMin: 1.6, scaleMax: 2.2, internals: 1 }
+        ],
         shrinkPower: 1.1
       },
       internal: {

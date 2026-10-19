@@ -401,7 +401,7 @@
       let text = stats.neurons + ' neurons · ' + simulation.phase +
         sensationLabel() + ' · ' +
         stats.temporaryHomes + ' housed · ' + stats.activeThoughts + ' moving · ' +
-        Math.round(simulation.saturation * 100) + '% saturated';
+        simulation.stats.saturated + '/' + simulation.schwannTotal + ' saturated';
       if (includePerformance) {
         text += ' · ' + stats.avgMs.toFixed(2) + ' ms update · ' +
           stats.fps.toFixed(0) + ' fps';
