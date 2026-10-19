@@ -39,7 +39,7 @@ The night uses the 2D duration rule. Five unsettled homes start an 18-hour night
 - Awake is light blue. As temporary homes approach the threshold, the background warms toward light red.
 - Stage 1 is pale lavender. It lasts until the sensation already traveling has faded or found a home. No new sensation starts.
 - REM is very light green. It lasts at least half the calculated night, and longer if a temporary home is still walking to its domain center. Those homes travel at three times the daytime speed, then settle light green at their regular size.
-- As each thought reaches its permanent home, it blocks a seeded-random group of 1, 2, 3, or 5 adjoining Schwann cells, which turn magenta. Selection proceeds clockwise around that neuron, starting with the cells nearest the soma before moving outward.
+- As each thought reaches its permanent home, it blocks a seeded-random group of 1, 2, 3, or 5 adjoining Schwann cells, which turn light green. Selection proceeds clockwise around that neuron, starting with the cells nearest the soma before moving outward.
 - Deep sleep is dark gray and lasts exactly the calculated half, even when REM ran longer. The neurons brighten so they stay visible.
 - Saturation is the blocked Schwann cells divided by every Schwann cell. The brain starts at 6° per second and slows toward 0.6° per second as that percentage rises.
 

@@ -72,7 +72,7 @@
       somaEdge: '#294b8b',
       nucleus: '#f2f8fd',
       schwann: '#78a8d2',
-      saturatedSchwann: '#ad1457',
+      saturatedSchwann: '#81c784',
       anchorRing: '#2e7d32',
       external: '#e53935',
       externalCore: '#ffebee',
@@ -93,7 +93,7 @@
       nightSoma: '#d5e6f6',
       nightSomaEdge: '#9ec0e4',
       nightSchwann: '#c5d8ea',
-      nightSaturatedSchwann: '#d8a7e5',
+      nightSaturatedSchwann: '#c8e6c9',
       nightText: '#e7f0f8',
       text: '#22407e'
     },
