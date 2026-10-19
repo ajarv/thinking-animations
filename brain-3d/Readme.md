@@ -19,16 +19,28 @@ The first stage builds the skeleton:
 
 One deterministic cohort runs at a time:
 
-1. A large pale-red external sensation approaches a seeded random surface neuron from outside the brain.
+1. A large red external sensation approaches a seeded random surface neuron from outside the brain.
 2. It follows a random, non-backtracking path along the visible zigzag axons and continuously shrinks.
-3. Three distinct knowledge centers are selected. Each emits one blue internal thought that follows the same network geometry and shrinks with age.
+3. Three distinct knowledge centers are selected. Each emits one blue internal thought that starts at 80–105% of the external sensation's current size. Each internal thought then shrinks at its own seeded rate: a lifetime of 4.5–12 seconds and a shrink curve between gentle and steep. It either fades to nothing or meets the shrinking external sensation.
 4. Internal routes aim toward different future portions of the external route, with seeded timing variation. Encounters are possible without changing the external sensation's random path.
 5. Collision is tested in 3D model space, not in the 2D projection. When a pair overlaps, both are consumed and the nearest neuron becomes a temporary home.
 6. The temporary home stops, turns orange, and grows to twice the regular external-thought radius. Unused internal thoughts finish fading before the next cohort starts.
 
 ![An orange double-sized temporary home](screenshots/temporary-home.png)
 
-Temporary homes remain visible and accumulate. There is not yet sleep, permanent housing, or purple crystallization in the 3D model.
+## Sleep cycle
+
+The night uses the 2D duration rule. Five unsettled homes start an 18-hour night; more unsettled homes shorten it along the 8-hour, 13-hour, and 4-hour anchors, and crystallized homes can only shorten it further. One simulated second represents two hours.
+
+- Awake is light blue. As temporary homes approach the threshold, the background warms toward light red.
+- Stage 1 is pale lavender. It lasts until the sensation already traveling has faded or found a home. No new sensation starts.
+- REM is very light green. It lasts at least half the calculated night, and longer if a temporary home is still walking to its domain center. Those homes travel at three times the daytime speed, then settle light green at their regular size.
+- Deep sleep is dark gray and lasts exactly the calculated half, even when REM ran longer. The neurons brighten so they stay visible.
+
+![Deep sleep after the temporary homes have settled](screenshots/deep.png)
+- Waking eases from dark gray back to light blue.
+
+There is not yet purple Schwann-cell crystallization in the 3D model.
 
 ## Running it
 

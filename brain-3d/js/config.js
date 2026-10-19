@@ -69,13 +69,41 @@
       nucleus: '#f2f8fd',
       schwann: '#78a8d2',
       anchorRing: '#2e7d32',
-      external: '#ef9a9a',
-      externalCore: '#fff6f6',
+      external: '#e53935',
+      externalCore: '#ffebee',
       internal: '#1d6fe3',
       internalCore: '#e5f0ff',
       temporary: '#ff9800',
       temporaryCore: '#fff3e0',
+      settled: '#81c784',
+      settledCore: '#e8f5e9',
+      needCenter: '#fff1f1',
+      needEdge: '#f6d5d5',
+      stage1Center: '#f4f0fb',
+      stage1Edge: '#e4dcf3',
+      remCenter: '#f3fbf4',
+      remEdge: '#d9f0dc',
+      deepCenter: '#4f535a',
+      deepEdge: '#24272d',
+      nightSoma: '#d5e6f6',
+      nightSomaEdge: '#9ec0e4',
+      nightSchwann: '#c5d8ea',
+      nightText: '#e7f0f8',
       text: '#22407e'
+    },
+    sleep: {
+      secondsPerHour: 2,
+      needPhase: 0.2,
+      wakeBlend: 1.8,
+      migrationSpeed: 1.02,
+      // Hours of sleep from the unsettled count. The curve is flat outside
+      // the anchors and log-linear between them.
+      anchors: [
+        { u: 5, hours: 18 },
+        { u: 8, hours: 12 },
+        { u: 13, hours: 8 },
+        { u: 21, hours: 4 }
+      ]
     },
     // Permanent homes. `count` is the only size. Families are not regions of
     // the brain; the same weights repeat inside a family.
@@ -107,11 +135,17 @@
         shrinkPower: 1.1
       },
       internal: {
-        ttl: 9,
+        // Each internal thought starts near the external sensation's radius,
+        // then shrinks at its own rate: a seeded lifetime and curve.
+        ttlMin: 4.5,
+        ttlMax: 12,
+        startMatchMin: 0.8,
+        startMatchMax: 1.05,
+        shrinkPowerMin: 0.7,
+        shrinkPowerMax: 1.8,
         speedMin: 0.22,
         speedMax: 0.72,
-        radius: 0.034,
-        shrinkPower: 1.2
+        radius: 0.034
       },
       temporary: {
         scale: 2,

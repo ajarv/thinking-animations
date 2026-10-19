@@ -107,7 +107,9 @@
       return createBead(colors.internal, colors.internalCore, 1.55);
     });
     const homeViews = simulation.homes.map(function () {
-      return createBead(colors.temporary, colors.temporaryCore, 1.45);
+      const view = createBead(colors.temporary, colors.temporaryCore, 1.45);
+      view.isHome = true;
+      return view;
     });
 
     const readout = new paper.PointText({
@@ -154,20 +156,119 @@
       fps: 0
     };
 
+    const daySoma = new paper.Color(colors.soma);
+    const daySomaEdge = new paper.Color(colors.somaEdge);
+    const daySchwann = new paper.Color(colors.schwann);
+    const dayText = new paper.Color(colors.text);
+    const nightSoma = new paper.Color(colors.nightSoma);
+    const nightSomaEdge = new paper.Color(colors.nightSomaEdge);
+    const nightSchwann = new paper.Color(colors.nightSchwann);
+    const nightText = new paper.Color(colors.nightText);
+    const mood = {
+      center: new paper.Color(colors.bgCenter),
+      edge: new paper.Color(colors.bgEdge),
+      dark: 0,
+      time: null
+    };
+
+    function hexColor(color) {
+      const channel = function (value) {
+        return ('0' + Math.round(Math.max(0, Math.min(1, value)) * 255).toString(16)).slice(-2);
+      };
+      return '#' + channel(color.red) + channel(color.green) + channel(color.blue);
+    }
+
+    function mixColor(a, b, t) {
+      const u = Math.max(0, Math.min(1, t));
+      return new paper.Color(
+        a.red + (b.red - a.red) * u,
+        a.green + (b.green - a.green) * u,
+        a.blue + (b.blue - a.blue) * u
+      );
+    }
+
+    function moodTarget() {
+      const blend = simulation.phaseBlend || 0;
+      if (simulation.phase === 'sleep-needed') {
+        return {
+          center: mixColor(new paper.Color(colors.bgCenter), new paper.Color(colors.needCenter), blend),
+          edge: mixColor(new paper.Color(colors.bgEdge), new paper.Color(colors.needEdge), blend)
+        };
+      }
+      if (simulation.phase === 'stage1') {
+        return {
+          center: new paper.Color(colors.stage1Center),
+          edge: new paper.Color(colors.stage1Edge)
+        };
+      }
+      if (simulation.phase === 'rem') {
+        return {
+          center: new paper.Color(colors.remCenter),
+          edge: new paper.Color(colors.remEdge)
+        };
+      }
+      if (simulation.phase === 'deep') {
+        return {
+          center: new paper.Color(colors.deepCenter),
+          edge: new paper.Color(colors.deepEdge)
+        };
+      }
+      if (simulation.phase === 'waking') {
+        return {
+          center: mixColor(new paper.Color(colors.deepCenter), new paper.Color(colors.bgCenter), blend),
+          edge: mixColor(new paper.Color(colors.deepEdge), new paper.Color(colors.bgEdge), blend)
+        };
+      }
+      return {
+        center: new paper.Color(colors.bgCenter),
+        edge: new paper.Color(colors.bgEdge)
+      };
+    }
+
+    function updateMood() {
+      const target = moodTarget();
+      const dt = mood.time === null ? Infinity : simulation.time - mood.time;
+      mood.time = simulation.time;
+      const k = dt < 0 || dt > 0.5 ? 1 : 1 - Math.exp(-dt / 0.55);
+      mood.center = mixColor(mood.center, target.center, k);
+      mood.edge = mixColor(mood.edge, target.edge, k);
+      const darkTarget = simulation.phase === 'deep' ? 1
+        : simulation.phase === 'waking' ? 1 - (simulation.phaseBlend || 0)
+        : 0;
+      mood.dark += (darkTarget - mood.dark) * k;
+      background.fillColor = {
+        gradient: {
+          stops: [hexColor(mood.center), hexColor(mood.edge)],
+          radial: true
+        },
+        origin: paper.view.center,
+        destination: paper.view.bounds.rightCenter
+      };
+      const somaFill = mixColor(daySoma, nightSoma, mood.dark);
+      const somaEdge = mixColor(daySomaEdge, nightSomaEdge, mood.dark);
+      const axon = mixColor(daySchwann, nightSchwann, mood.dark);
+      for (let i = 0; i < cells.length; i++) {
+        const soma = neurons[i].category >= 0 ? cells[i].children[1] : cells[i].children[0];
+        soma.fillColor = somaFill;
+        if (neurons[i].category < 0) soma.strokeColor = somaEdge;
+      }
+      for (let i = 0; i < schwannCells.length; i++) {
+        for (let j = 0; j < schwannCells[i].length; j++) schwannCells[i][j].strokeColor = axon;
+      }
+      readout.fillColor = mixColor(dayText, nightText, mood.dark);
+      document.body.style.background = hexColor(mood.center);
+    }
+
     function layout() {
       const bounds = paper.view.bounds;
       background.segments[0].point = bounds.bottomLeft;
       background.segments[1].point = bounds.topLeft;
       background.segments[2].point = bounds.topRight;
       background.segments[3].point = bounds.bottomRight;
-      background.fillColor = {
-        gradient: { stops: [colors.bgCenter, colors.bgEdge], radial: true },
-        origin: bounds.center,
-        destination: new Point(bounds.right, bounds.top)
-      };
       cx = bounds.center.x;
       cy = bounds.center.y;
       scale = Math.min(bounds.width, bounds.height) * camera.fill * camera.distance;
+      updateMood();
     }
 
     function projectPoint(x, y, z, into) {
@@ -228,6 +329,16 @@
       matrix.ty = p.y;
       view.group.matrix = matrix;
       view.group.opacity = fadeAt > 0 ? Math.min(1, item.scale / fadeAt) : 1;
+      if (view.isHome) {
+        const settled = item.state === 'settled';
+        const kind = settled ? 'settled' : 'temporary';
+        if (view.kind !== kind) {
+          view.kind = kind;
+          view.group.children[0].fillColor = settled ? colors.settled : colors.temporary;
+          view.group.children[1].fillColor = settled ? colors.settled : colors.temporary;
+          view.group.children[1].strokeColor = settled ? colors.settledCore : colors.temporaryCore;
+        }
+      }
       view.group.visible = true;
       view.record.active = true;
       view.record.depth = p.z;
@@ -240,7 +351,7 @@
         externalView,
         simulation.external,
         thoughtCfg.external.radius,
-        0.45
+        0
       )) active++;
       for (let i = 0; i < internalViews.length; i++) {
         if (placeBead(
@@ -266,9 +377,8 @@
     }
 
     function statusText(includePerformance) {
-      let text = stats.neurons + ' neurons · ' + stats.axons + ' axons · ' +
-        stats.schwannCells + ' Schwann cells · ' + stats.domains + ' domains · ' +
-        stats.activeThoughts + ' moving · ' + stats.temporaryHomes + ' temporary';
+      let text = stats.neurons + ' neurons · ' + simulation.phase + ' · ' +
+        stats.temporaryHomes + ' housed · ' + stats.activeThoughts + ' moving';
       if (includePerformance) {
         text += ' · ' + stats.avgMs.toFixed(2) + ' ms update · ' +
           stats.fps.toFixed(0) + ' fps';
@@ -279,6 +389,7 @@
     function draw(dt) {
       const t0 = now();
       yaw += yawRate * dt;
+      updateMood();
       project();
 
       for (let i = 0; i < edges.length; i++) {

@@ -52,8 +52,10 @@
       internals.push({
         active: false,
         age: 0,
-        ttl: cfg.internal.ttl,
+        ttl: cfg.internal.ttlMax,
         scale: 0,
+        startScale: 1,
+        shrinkPower: 1,
         speed: cfg.internal.speedMin,
         route: [],
         routeIndex: 0,
@@ -69,10 +71,16 @@
     for (let i = 0; i < cfg.maxHomes; i++) {
       homes.push({
         active: false,
+        state: 'temporary',
         age: 0,
         scale: 1,
         node: -1,
         serial: 0,
+        settledAt: -1,
+        route: [],
+        routeIndex: 0,
+        progress: 0,
+        speed: 0,
         position: { x: 0, y: 0, z: 0 }
       });
     }
@@ -82,6 +90,20 @@
       serial: 0,
       cohortActive: false,
       nextSpawn: cfg.spawnDelay,
+      phase: 'awake',
+      phaseBlend: 0,
+      asleep: false,
+      inStage1: false,
+      inDeep: false,
+      sleeps: 0,
+      stateTime: 0,
+      lastWakeAt: -1,
+      need: 0,
+      unsettled: 0,
+      crystallized: 0,
+      threshold: config.sleep.anchors[0].u,
+      calculatedRemSeconds: 0,
+      deepTargetSeconds: 0,
       external: external,
       internals: internals,
       homes: homes,
@@ -238,8 +260,15 @@
       item.progress = 0;
       item.active = item.route.length > 0;
       item.age = 0;
-      item.ttl = cfg.internal.ttl;
-      item.scale = 1;
+      const internalCfg = cfg.internal;
+      const externalRadius = cfg.external.radius * external.scale;
+      const match = internalCfg.startMatchMin +
+        rng() * (internalCfg.startMatchMax - internalCfg.startMatchMin);
+      item.ttl = internalCfg.ttlMin + rng() * (internalCfg.ttlMax - internalCfg.ttlMin);
+      item.shrinkPower = internalCfg.shrinkPowerMin +
+        rng() * (internalCfg.shrinkPowerMax - internalCfg.shrinkPowerMin);
+      item.startScale = externalRadius * match / internalCfg.radius;
+      item.scale = item.startScale;
       item.speed = clamp(desiredSpeed, cfg.internal.speedMin, cfg.internal.speedMax);
       item.sourceCategory = category;
       item.targetNode = targetNode;
@@ -332,7 +361,7 @@
         const item = internals[i];
         if (!item.active) continue;
         item.age += dt;
-        item.scale = fadeScale(item.age, item.ttl, 1, cfg.internal.shrinkPower);
+        item.scale = fadeScale(item.age, item.ttl, item.startScale, item.shrinkPower);
         if (item.age >= item.ttl) {
           item.active = false;
           state.stats.internalFaded++;
@@ -372,9 +401,14 @@
       if (!home) home = oldest;
       const node = neurons[nodeId];
       home.active = true;
+      home.state = 'temporary';
       home.age = 0;
       home.scale = 1;
       home.node = nodeId;
+      home.settledAt = -1;
+      home.route = [];
+      home.routeIndex = 0;
+      home.progress = 0;
       home.serial = state.stats.housed + 1;
       home.position.x = node.x;
       home.position.y = node.y;
@@ -407,14 +441,59 @@
       }
     }
 
+    function ease(u) {
+      const t = clamp(u, 0, 1);
+      return t * t * (3 - 2 * t);
+    }
+
+    function settleHome(home, nodeId) {
+      home.state = 'settled';
+      home.node = nodeId;
+      home.settledAt = state.time;
+      home.route = [];
+      setAtNode(home, nodeId);
+    }
+
+    function stepMigration(home, dt) {
+      let remaining = dt;
+      let guard = 0;
+      while (remaining > 0.000001 && home.state === 'migrating' && guard < 12) {
+        const segment = home.route[home.routeIndex];
+        if (!segment) {
+          settleHome(home, home.node);
+          return;
+        }
+        const rate = home.speed / Math.max(0.0001, edges[segment.edge].length);
+        const untilEnd = (1 - home.progress) / rate;
+        if (remaining < untilEnd) {
+          home.progress += rate * remaining;
+          remaining = 0;
+          const t = segment.forward ? home.progress : 1 - home.progress;
+          skeleton.pointOnEdge(segment.edge, t, home.position);
+        } else {
+          remaining -= untilEnd;
+          home.node = segment.to;
+          home.routeIndex++;
+          home.progress = 0;
+          if (home.routeIndex >= home.route.length) settleHome(home, segment.to);
+        }
+        guard++;
+      }
+    }
+
     function stepHomes(dt) {
       for (let i = 0; i < homes.length; i++) {
         const home = homes[i];
         if (!home.active) continue;
         home.age += dt;
-        const u = Math.min(1, home.age / cfg.temporary.growDuration);
-        const ease = u * u * (3 - 2 * u);
-        home.scale = 1 + (cfg.temporary.scale - 1) * ease;
+        if (home.state === 'migrating') stepMigration(home, dt);
+        if (home.state === 'settled') {
+          const u = (state.time - home.settledAt) / cfg.temporary.growDuration;
+          home.scale = cfg.temporary.scale - (cfg.temporary.scale - 1) * ease(u);
+        } else {
+          const u = home.age / cfg.temporary.growDuration;
+          home.scale = 1 + (cfg.temporary.scale - 1) * ease(u);
+        }
       }
     }
 
@@ -434,17 +513,174 @@
       return active;
     }
 
+    const sleep = config.sleep;
+    const firstAnchor = sleep.anchors[0];
+
+    function unsettledHours(count) {
+      const anchors = sleep.anchors;
+      if (count <= anchors[0].u) return anchors[0].hours;
+      const last = anchors[anchors.length - 1];
+      if (count >= last.u) return last.hours;
+      for (let i = 1; i < anchors.length; i++) {
+        const a = anchors[i - 1];
+        const b = anchors[i];
+        if (count > b.u) continue;
+        const t = (Math.log(count) - Math.log(a.u)) / (Math.log(b.u) - Math.log(a.u));
+        return Math.exp(Math.log(a.hours) + (Math.log(b.hours) - Math.log(a.hours)) * t);
+      }
+      return last.hours;
+    }
+
+    function sleepHours(unsettled, crystallized) {
+      const base = unsettledHours(unsettled);
+      const onsetCrystallized = config.categories.count * unsettled / firstAnchor.u;
+      if (!(crystallized > onsetCrystallized) || !(crystallized > 0)) return base;
+      return base * clamp(
+        (config.categories.count * unsettled) / (firstAnchor.u * crystallized),
+        0.5,
+        1
+      );
+    }
+
+    function countHomes(predicate) {
+      let count = 0;
+      for (let i = 0; i < homes.length; i++) {
+        if (homes[i].active && predicate(homes[i])) count++;
+      }
+      return count;
+    }
+
+    function refreshSleepCounts() {
+      state.crystallized = countHomes(function (home) { return home.state === 'settled'; });
+      state.unsettled = countHomes(function (home) {
+        return home.state === 'temporary' || home.state === 'migrating';
+      });
+      state.threshold = Math.max(
+        firstAnchor.u,
+        Math.round(firstAnchor.u * state.crystallized / config.categories.count)
+      );
+      state.need = state.threshold > 0 ? clamp(state.unsettled / state.threshold, 0, 1) : 0;
+    }
+
+    function setPhase(name, blend) {
+      state.phase = name;
+      state.phaseBlend = clamp(blend, 0, 1);
+    }
+
+    function assignAwakePhase() {
+      if (state.lastWakeAt >= 0 && state.stateTime < sleep.wakeBlend && state.need < sleep.needPhase) {
+        setPhase('waking', state.stateTime / sleep.wakeBlend);
+        return;
+      }
+      if (state.need >= sleep.needPhase) setPhase('sleep-needed', state.need);
+      else setPhase('awake', 0);
+    }
+
+    function stage1Remaining() {
+      let count = 0;
+      const travelers = [external].concat(internals);
+      for (let i = 0; i < travelers.length; i++) {
+        if (travelers[i].stage1Sleep === state.sleeps && travelers[i].active) count++;
+      }
+      return count;
+    }
+
+    function beginRem() {
+      state.inStage1 = false;
+      state.remStartedAt = state.time;
+      for (let i = 0; i < homes.length; i++) {
+        const home = homes[i];
+        if (!home.active || home.state === 'settled') continue;
+        const target = anchors[neurons[home.node].domain];
+        home.route = shortestRoute(home.node, target.id);
+        home.routeIndex = 0;
+        home.progress = 0;
+        home.speed = sleep.migrationSpeed;
+        if (!home.route.length) settleHome(home, target.id);
+        else home.state = 'migrating';
+      }
+    }
+
+    function fallAsleep() {
+      refreshSleepCounts();
+      const hours = sleepHours(state.unsettled, state.crystallized);
+      const seconds = hours * sleep.secondsPerHour;
+      state.asleep = true;
+      state.inStage1 = true;
+      state.inDeep = false;
+      state.sleeps++;
+      state.stateTime = 0;
+      state.stage1StartedAt = state.time;
+      state.calculatedRemSeconds = seconds / 2;
+      state.deepTargetSeconds = seconds / 2;
+      state.sleepHours = hours;
+      const travelers = [external].concat(internals);
+      for (let i = 0; i < travelers.length; i++) {
+        travelers[i].stage1Sleep = travelers[i].active ? state.sleeps : -1;
+      }
+      setPhase('stage1', 1);
+    }
+
+    function wakeFromDeep() {
+      state.asleep = false;
+      state.inDeep = false;
+      state.stateTime = 0;
+      state.lastWakeAt = state.time;
+      state.nextSpawn = state.time + cfg.spawnDelay;
+      setPhase('waking', 0);
+    }
+
+    function updateSleep(dt) {
+      state.stateTime += dt;
+      refreshSleepCounts();
+      if (!state.asleep) {
+        if (state.unsettled >= state.threshold) {
+          fallAsleep();
+          return;
+        }
+        assignAwakePhase();
+        return;
+      }
+      if (state.inStage1) {
+        const elapsed = state.time - state.stage1StartedAt;
+        if (stage1Remaining() > 0 || elapsed <= 0) {
+          setPhase('stage1', 1);
+          return;
+        }
+        beginRem();
+      }
+      if (state.inDeep) {
+        const elapsed = state.time - state.deepStartedAt;
+        setPhase('deep', clamp(elapsed / Math.max(state.deepTargetSeconds, dt), 0, 1));
+        if (elapsed + 1e-8 >= state.deepTargetSeconds) wakeFromDeep();
+        return;
+      }
+      const elapsed = state.time - state.remStartedAt;
+      const remOpen = countHomes(function (home) {
+        return home.state === 'temporary' || home.state === 'migrating';
+      });
+      if (elapsed + 1e-8 < state.calculatedRemSeconds || remOpen > 0) {
+        setPhase('rem', remOpen > 0 ? 0.45 : 1);
+        return;
+      }
+      state.inDeep = true;
+      state.deepStartedAt = state.time;
+      state.deepTargetSeconds = state.calculatedRemSeconds;
+      setPhase('deep', 0);
+    }
+
     function step(dt) {
       state.time += dt;
-      if (!state.cohortActive && state.time >= state.nextSpawn) spawnCohort();
+      if (!state.asleep && !state.cohortActive && state.time >= state.nextSpawn) spawnCohort();
       stepExternal(dt);
       stepInternals(dt);
       resolveCollision();
       stepHomes(dt);
       if (state.cohortActive && !external.active && activeInternals() === 0) {
         state.cohortActive = false;
-        state.nextSpawn = state.time + cfg.spawnDelay;
+        if (!state.asleep) state.nextSpawn = state.time + cfg.spawnDelay;
       }
+      updateSleep(dt);
     }
 
     state.step = step;
