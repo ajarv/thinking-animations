@@ -15,13 +15,17 @@ The first stage builds the skeleton:
 
 ## External and internal thoughts
 
-![A large external sensation and three internal thoughts](screenshots/thought-entry.png)
+![A red sensation flying straight in from outside the brain](screenshots/sensation-approaching.png)
+
+![Sensation received where the straight flight meets the mesh](screenshots/sensation-received.png)
+
+![Sensation accepted, with three internal thoughts just launched](screenshots/thought-entry.png)
 
 One deterministic cohort runs at a time:
 
-1. A large red external sensation approaches a seeded random surface neuron from outside the brain.
-2. It follows a random, non-backtracking path along the visible zigzag axons and continuously shrinks.
-3. Three distinct knowledge centers are selected. Each emits one blue internal thought that starts at 80–105% of the external sensation's current size. Each internal thought then shrinks at its own seeded rate: a lifetime of 4.5–12 seconds and a shrink curve between gentle and steep. It either fades to nothing or meets the shrinking external sensation.
+1. A large red external sensation appears outside the brain, beyond the outermost neurons, and flies in a straight line toward the brain center.
+2. The first contact with a neuron or axon is **sensation received**. The sensation settles onto that strand and rests there briefly.
+3. Acceptance is assumed for now, so received is followed by **sensation accepted**. On acceptance the sensation travels a random, non-backtracking path along the visible zigzag axons and continuously shrinks. Three distinct knowledge centers then emit one blue internal thought each. Each internal thought starts at 80–105% of the sensation's size at acceptance and shrinks at its own seeded rate: a lifetime of 4.5–12 seconds and a shrink curve between gentle and steep. It either fades to nothing or meets the shrinking sensation.
 4. Internal routes aim toward different future portions of the external route, with seeded timing variation. Encounters are possible without changing the external sensation's random path.
 5. Collision is tested in 3D model space, not in the 2D projection. When a pair overlaps, both are consumed and the nearest neuron becomes a temporary home.
 6. The temporary home stops, turns orange, and grows to twice the regular external-thought radius. Unused internal thoughts finish fading before the next cohort starts.
@@ -35,12 +39,12 @@ The night uses the 2D duration rule. Five unsettled homes start an 18-hour night
 - Awake is light blue. As temporary homes approach the threshold, the background warms toward light red.
 - Stage 1 is pale lavender. It lasts until the sensation already traveling has faded or found a home. No new sensation starts.
 - REM is very light green. It lasts at least half the calculated night, and longer if a temporary home is still walking to its domain center. Those homes travel at three times the daytime speed, then settle light green at their regular size.
+- As each thought reaches its permanent home, it blocks a seeded-random group of 1, 2, 3, or 5 adjoining Schwann cells, which turn magenta. Selection proceeds clockwise around that neuron, starting with the cells nearest the soma before moving outward.
 - Deep sleep is dark gray and lasts exactly the calculated half, even when REM ran longer. The neurons brighten so they stay visible.
+- The brain starts at 6° per second and progressively slows toward 0.6° per second as its Schwann-cell memory capacity becomes saturated.
 
 ![Deep sleep after the temporary homes have settled](screenshots/deep.png)
 - Waking eases from dark gray back to light blue.
-
-There is not yet purple Schwann-cell crystallization in the 3D model.
 
 ## Running it
 

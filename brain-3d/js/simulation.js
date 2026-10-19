@@ -30,10 +30,124 @@
     const cfg = config.thoughts;
     const rng = mulberry32((config.seed ^ 0xA341316C) >>> 0);
     const positionScratch = { x: 0, y: 0, z: 0 };
+    const center = { x: 0, y: 0, z: 0 };
+    neurons.forEach(function (neuron) {
+      center.x += neuron.x;
+      center.y += neuron.y;
+      center.z += neuron.z;
+    });
+    center.x /= neurons.length;
+    center.y /= neurons.length;
+    center.z /= neurons.length;
+    let shellRadius = 0;
+    neurons.forEach(function (neuron) {
+      shellRadius = Math.max(shellRadius, Math.hypot(
+        neuron.x - center.x, neuron.y - center.y, neuron.z - center.z
+      ));
+    });
+    const meshPoints = [];
+    const meshSegments = [];
+    const bendSteps = Math.max(1, config.schwann.cellsPerAxon);
+    edges.forEach(function (edge) {
+      let previous = null;
+      for (let step = 0; step <= bendSteps; step++) {
+        const u = step / bendSteps;
+        const point = skeleton.pointOnEdge(edge.id, u);
+        const sample = { edge: edge.id, u: u, x: point.x, y: point.y, z: point.z };
+        meshPoints.push(sample);
+        if (previous) {
+          meshSegments.push({
+            edge: edge.id,
+            u0: previous.u,
+            u1: u,
+            ax: previous.x,
+            ay: previous.y,
+            az: previous.z,
+            bx: sample.x,
+            by: sample.y,
+            bz: sample.z
+          });
+        }
+        previous = sample;
+      }
+    });
+
+    // Looking inward from outside the shell, sort each neuron's axons
+    // clockwise. Saturation walks around that order, then moves one Schwann
+    // cell farther from the neuron and walks around again.
+    const schwannCount = config.schwann.cellsPerAxon;
+    const blockCounts = cfg.saturation.blockCounts;
+    const averageBlock = blockCounts.reduce(function (sum, count) {
+      return sum + count;
+    }, 0) / blockCounts.length;
+    const saturationCapacity = cfg.maxHomes * averageBlock;
+    const saturatedSchwann = edges.map(function () {
+      return new Array(schwannCount).fill(false);
+    });
+    const saturationOrder = neurons.map(function (neuron) {
+      let nx = neuron.x - center.x;
+      let ny = neuron.y - center.y;
+      let nz = neuron.z - center.z;
+      const nl = Math.hypot(nx, ny, nz) || 1;
+      nx /= nl;
+      ny /= nl;
+      nz /= nl;
+
+      // Tangent "up"; switch reference near the poles.
+      let rx = 0;
+      let ry = 1;
+      let rz = 0;
+      if (Math.abs(ny) > 0.9) {
+        rx = 1;
+        ry = 0;
+      }
+      const dot = rx * nx + ry * ny + rz * nz;
+      let ux = rx - nx * dot;
+      let uy = ry - ny * dot;
+      let uz = rz - nz * dot;
+      const ul = Math.hypot(ux, uy, uz) || 1;
+      ux /= ul;
+      uy /= ul;
+      uz /= ul;
+      const vx = ny * uz - nz * uy;
+      const vy = nz * ux - nx * uz;
+      const vz = nx * uy - ny * ux;
+
+      const around = neuron.adjacent.map(function (option) {
+        const other = neurons[option.to];
+        let dx = other.x - neuron.x;
+        let dy = other.y - neuron.y;
+        let dz = other.z - neuron.z;
+        const radial = dx * nx + dy * ny + dz * nz;
+        dx -= nx * radial;
+        dy -= ny * radial;
+        dz -= nz * radial;
+        return {
+          edge: option.edge,
+          nearA: edges[option.edge].a === neuron.id,
+          angle: Math.atan2(dx * vx + dy * vy + dz * vz, dx * ux + dy * uy + dz * uz)
+        };
+      });
+      around.sort(function (a, b) {
+        return b.angle - a.angle || a.edge - b.edge;
+      });
+
+      const order = [];
+      for (let ring = 0; ring < schwannCount; ring++) {
+        for (let i = 0; i < around.length; i++) {
+          order.push({
+            edge: around[i].edge,
+            cell: around[i].nearA ? ring : schwannCount - 1 - ring
+          });
+        }
+      }
+      return order;
+    });
 
     const external = {
       active: false,
       state: 'idle',
+      accepted: false,
       age: 0,
       ttl: cfg.external.ttl,
       scale: 0,
@@ -42,8 +156,12 @@
       routeIndex: 0,
       progress: 0,
       position: { x: 0, y: 0, z: 0 },
-      entryFrom: { x: 0, y: 0, z: 0 },
-      entryTo: { x: 0, y: 0, z: 0 },
+      origin: { x: 0, y: 0, z: 0 },
+      direction: { x: 0, y: 0, z: 1 },
+      flight: 0,
+      hitT: 0,
+      hit: null,
+      receivedAt: -1,
       serial: 0
     };
 
@@ -76,6 +194,7 @@
         scale: 1,
         node: -1,
         serial: 0,
+        blockedSchwann: 0,
         settledAt: -1,
         route: [],
         routeIndex: 0,
@@ -101,12 +220,14 @@
       need: 0,
       unsettled: 0,
       crystallized: 0,
+      saturation: 0,
       threshold: config.sleep.anchors[0].u,
       calculatedRemSeconds: 0,
       deepTargetSeconds: 0,
       external: external,
       internals: internals,
       homes: homes,
+      saturatedSchwann: saturatedSchwann,
       stats: {
         cohorts: 0,
         housed: 0,
@@ -115,9 +236,44 @@
         latestSources: [],
         latestEntry: -1,
         latestHome: -1,
-        collisions: 0
+        collisions: 0,
+        received: 0,
+        accepted: 0,
+        saturated: 0,
+        saturationEvents: 0,
+        latestBlockSize: 0
       }
     };
+
+    function saturateNextSchwann(nodeId) {
+      const order = saturationOrder[nodeId];
+      for (let i = 0; i < order.length; i++) {
+        const candidate = order[i];
+        if (saturatedSchwann[candidate.edge][candidate.cell]) continue;
+        saturatedSchwann[candidate.edge][candidate.cell] = true;
+        state.stats.saturated++;
+        state.saturation = clamp(state.stats.saturated / saturationCapacity, 0, 1);
+        state.stats.latestSaturated = {
+          node: nodeId,
+          edge: candidate.edge,
+          cell: candidate.cell
+        };
+        return candidate;
+      }
+      return null;
+    }
+
+    function blockSchwannCells(home, nodeId) {
+      const requested = blockCounts[Math.floor(rng() * blockCounts.length)];
+      let blocked = 0;
+      for (let i = 0; i < requested; i++) {
+        if (!saturateNextSchwann(nodeId)) break;
+        blocked++;
+      }
+      home.blockedSchwann = blocked;
+      state.stats.saturationEvents++;
+      state.stats.latestBlockSize = blocked;
+    }
 
     function randomRoute(start, count, previous) {
       const route = [];
@@ -248,8 +404,12 @@
       const targetSegment = external.route[Math.min(targetStep, external.route.length - 1)];
       const targetNode = targetSegment.to;
       const route = shortestRoute(anchor.id, targetNode);
-      const externalDistance = routeLength(external.route, edges, targetStep);
-      const arrival = cfg.external.entryDuration + externalDistance / cfg.external.speed;
+      const externalDistance = Math.max(
+        0.15,
+        routeLength(external.route, edges, targetStep) -
+          external.progress * edges[external.route[0].edge].length
+      );
+      const arrival = externalDistance / cfg.external.speed;
       const internalDistance = routeLength(route, edges);
       const variation = 0.92 + rng() * 0.16;
       const desiredSpeed = internalDistance / Math.max(0.5, arrival) * variation;
@@ -273,45 +433,255 @@
       item.sourceCategory = category;
       item.targetNode = targetNode;
       item.serial = cohortSerial;
+      item.stage1Sleep = state.inStage1 ? state.sleeps : -1;
       setAtNode(item, anchor.id);
       if (item.active) placeOnRoute(item);
     }
 
-    function spawnCohort() {
-      const cohortSerial = ++state.serial;
-      const entry = Math.floor(rng() * neurons.length);
-      const node = neurons[entry];
-      external.active = true;
-      external.state = 'entry';
-      external.age = 0;
-      external.ttl = cfg.external.ttl;
-      external.scale = cfg.external.entryScale;
-      external.speed = cfg.external.speed;
-      external.route = randomRoute(entry, cfg.routeEdges, -1);
-      external.routeIndex = 0;
-      external.progress = 0;
-      external.serial = cohortSerial;
-      external.entryTo.x = node.x;
-      external.entryTo.y = node.y;
-      external.entryTo.z = node.z;
-      external.entryFrom.x = node.x * cfg.external.entryDistance;
-      external.entryFrom.y = node.y * cfg.external.entryDistance;
-      external.entryFrom.z = node.z * cfg.external.entryDistance;
-      external.position.x = external.entryFrom.x;
-      external.position.y = external.entryFrom.y;
-      external.position.z = external.entryFrom.z;
+    function raySphereT(ox, oy, oz, dx, dy, dz, cx, cy, cz, radius) {
+      const lx = ox - cx;
+      const ly = oy - cy;
+      const lz = oz - cz;
+      const b = lx * dx + ly * dy + lz * dz;
+      const c = lx * lx + ly * ly + lz * lz - radius * radius;
+      const disc = b * b - c;
+      if (disc < 0) return null;
+      const root = Math.sqrt(disc);
+      const near = -b - root;
+      if (near >= 0) return near;
+      const far = -b + root;
+      return far >= 0 ? far : null;
+    }
 
+    function rayCylinderT(ox, oy, oz, dx, dy, dz, ax, ay, az, bx, by, bz, radius) {
+      const abx = bx - ax;
+      const aby = by - ay;
+      const abz = bz - az;
+      const len = Math.hypot(abx, aby, abz);
+      if (len < 1e-8) return null;
+      const ux = abx / len;
+      const uy = aby / len;
+      const uz = abz / len;
+      const ocx = ox - ax;
+      const ocy = oy - ay;
+      const ocz = oz - az;
+      const dDot = dx * ux + dy * uy + dz * uz;
+      const ocDot = ocx * ux + ocy * uy + ocz * uz;
+      const rdx = dx - ux * dDot;
+      const rdy = dy - uy * dDot;
+      const rdz = dz - uz * dDot;
+      const rox = ocx - ux * ocDot;
+      const roy = ocy - uy * ocDot;
+      const roz = ocz - uz * ocDot;
+      const a = rdx * rdx + rdy * rdy + rdz * rdz;
+      if (a < 1e-10) return null;
+      const b = 2 * (rdx * rox + rdy * roy + rdz * roz);
+      const c = rox * rox + roy * roy + roz * roz - radius * radius;
+      const disc = b * b - 4 * a * c;
+      if (disc < 0) return null;
+      const root = Math.sqrt(disc);
+      const candidates = [(-b - root) / (2 * a), (-b + root) / (2 * a)];
+      for (let i = 0; i < candidates.length; i++) {
+        const t = candidates[i];
+        if (t < 0) continue;
+        const px = ox + dx * t;
+        const py = oy + dy * t;
+        const pz = oz + dz * t;
+        const along = (px - ax) * ux + (py - ay) * uy + (pz - az) * uz;
+        if (along >= 0 && along <= len) return t;
+      }
+      return null;
+    }
+
+    function rememberHit(best, t, hit) {
+      if (t == null || t < 0 || t >= best.t) return;
+      hit.t = t;
+      best.t = t;
+      best.hit = hit;
+    }
+
+    function findApproachHit(origin, direction) {
+      const radius = cfg.external.contactRadius;
+      const best = { t: Infinity, hit: null };
+      for (let i = 0; i < neurons.length; i++) {
+        const neuron = neurons[i];
+        const t = raySphereT(
+          origin.x, origin.y, origin.z,
+          direction.x, direction.y, direction.z,
+          neuron.x, neuron.y, neuron.z,
+          radius
+        );
+        rememberHit(best, t, {
+          kind: 'neuron',
+          node: i,
+          edge: -1,
+          u: 0,
+          meshX: neuron.x,
+          meshY: neuron.y,
+          meshZ: neuron.z
+        });
+      }
+      for (let i = 0; i < meshPoints.length; i++) {
+        const sample = meshPoints[i];
+        const t = raySphereT(
+          origin.x, origin.y, origin.z,
+          direction.x, direction.y, direction.z,
+          sample.x, sample.y, sample.z,
+          radius
+        );
+        rememberHit(best, t, {
+          kind: 'edge',
+          node: -1,
+          edge: sample.edge,
+          u: sample.u,
+          meshX: sample.x,
+          meshY: sample.y,
+          meshZ: sample.z
+        });
+      }
+      for (let i = 0; i < meshSegments.length; i++) {
+        const segment = meshSegments[i];
+        const t = rayCylinderT(
+          origin.x, origin.y, origin.z,
+          direction.x, direction.y, direction.z,
+          segment.ax, segment.ay, segment.az,
+          segment.bx, segment.by, segment.bz,
+          radius
+        );
+        if (t == null) continue;
+        const px = origin.x + direction.x * t;
+        const py = origin.y + direction.y * t;
+        const pz = origin.z + direction.z * t;
+        const abx = segment.bx - segment.ax;
+        const aby = segment.by - segment.ay;
+        const abz = segment.bz - segment.az;
+        const lab2 = abx * abx + aby * aby + abz * abz || 1;
+        const s = clamp(((px - segment.ax) * abx + (py - segment.ay) * aby + (pz - segment.az) * abz) / lab2, 0, 1);
+        const u = segment.u0 + (segment.u1 - segment.u0) * s;
+        const mesh = skeleton.pointOnEdge(segment.edge, u);
+        rememberHit(best, t, {
+          kind: 'edge',
+          node: -1,
+          edge: segment.edge,
+          u: u,
+          meshX: mesh.x,
+          meshY: mesh.y,
+          meshZ: mesh.z
+        });
+      }
+      if (!best.hit) {
+        const reach = Math.hypot(
+          center.x - origin.x, center.y - origin.y, center.z - origin.z
+        ) + radius;
+        let nearest = Infinity;
+        meshPoints.forEach(function (sample) {
+          const vx = sample.x - origin.x;
+          const vy = sample.y - origin.y;
+          const vz = sample.z - origin.z;
+          const t = vx * direction.x + vy * direction.y + vz * direction.z;
+          if (t < 0 || t > reach) return;
+          const distance = Math.hypot(vx - direction.x * t, vy - direction.y * t, vz - direction.z * t);
+          if (distance >= nearest) return;
+          nearest = distance;
+          best.t = t;
+          best.hit = {
+            kind: 'edge',
+            node: -1,
+            edge: sample.edge,
+            u: sample.u,
+            meshX: sample.x,
+            meshY: sample.y,
+            meshZ: sample.z,
+            t: t
+          };
+        });
+      }
+      const hit = best.hit;
+      hit.rayX = origin.x + direction.x * hit.t;
+      hit.rayY = origin.y + direction.y * hit.t;
+      hit.rayZ = origin.z + direction.z * hit.t;
+      return hit;
+    }
+
+    function routeFromHit(hit) {
+      if (hit.kind === 'neuron') {
+        external.route = randomRoute(hit.node, cfg.routeEdges, -1);
+        external.routeIndex = 0;
+        external.progress = 0;
+        return hit.node;
+      }
+      const edge = edges[hit.edge];
+      const forward = rng() < 0.5;
+      const from = forward ? edge.a : edge.b;
+      const to = forward ? edge.b : edge.a;
+      const first = { edge: edge.id, forward: forward, from: from, to: to };
+      const rest = randomRoute(to, Math.max(0, cfg.routeEdges - 1), from);
+      external.route = [first].concat(rest);
+      external.routeIndex = 0;
+      external.progress = forward ? hit.u : 1 - hit.u;
+      return from;
+    }
+
+    function acceptSensation() {
+      if (!external.active || external.accepted) return;
+      external.accepted = true;
+      external.state = 'network';
+      state.stats.accepted++;
+      const entry = routeFromHit(external.hit);
+      state.stats.latestEntry = entry;
+      if (!external.route.length) {
+        external.active = false;
+        external.state = 'faded';
+        state.stats.externalFaded++;
+        return;
+      }
+      placeOnRoute(external);
       const sources = pickCenters();
       state.stats.latestSources = sources.slice();
       const routeLast = Math.max(1, external.route.length - 1);
       for (let i = 0; i < internals.length; i++) {
         const target = Math.min(routeLast, 4 + i * 4 + Math.floor(rng() * 3));
-        spawnInternal(internals[i], sources[i], target, cohortSerial);
+        spawnInternal(internals[i], sources[i], target, external.serial);
       }
+    }
 
+    function spawnCohort() {
+      const cohortSerial = ++state.serial;
+      const z = rng() * 2 - 1;
+      const theta = rng() * Math.PI * 2;
+      const ring = Math.sqrt(Math.max(0, 1 - z * z));
+      const outwardX = ring * Math.cos(theta);
+      const outwardY = z;
+      const outwardZ = ring * Math.sin(theta);
+      const distance = shellRadius + cfg.external.approachGap;
+      external.active = true;
+      external.accepted = false;
+      external.state = 'approaching';
+      external.age = 0;
+      external.ttl = cfg.external.ttl;
+      external.scale = cfg.external.entryScale;
+      external.speed = cfg.external.speed;
+      external.route = [];
+      external.routeIndex = 0;
+      external.progress = 0;
+      external.serial = cohortSerial;
+      external.flight = 0;
+      external.receivedAt = -1;
+      external.origin.x = center.x + outwardX * distance;
+      external.origin.y = center.y + outwardY * distance;
+      external.origin.z = center.z + outwardZ * distance;
+      external.direction.x = -outwardX;
+      external.direction.y = -outwardY;
+      external.direction.z = -outwardZ;
+      external.hit = findApproachHit(external.origin, external.direction);
+      external.hitT = external.hit.t;
+      external.position.x = external.origin.x;
+      external.position.y = external.origin.y;
+      external.position.z = external.origin.z;
       state.cohortActive = true;
       state.stats.cohorts++;
-      state.stats.latestEntry = entry;
+      state.stats.latestEntry = -1;
+      state.stats.latestSources = [];
     }
 
     function fadeScale(age, ttl, start, power) {
@@ -333,20 +703,27 @@
         state.stats.externalFaded++;
         return;
       }
-      if (external.state === 'entry') {
-        const u = Math.min(1, external.age / cfg.external.entryDuration);
+      if (external.state === 'approaching') {
+        external.flight += cfg.external.approachSpeed * dt;
+        const t = Math.min(external.flight, external.hitT);
+        external.position.x = external.origin.x + external.direction.x * t;
+        external.position.y = external.origin.y + external.direction.y * t;
+        external.position.z = external.origin.z + external.direction.z * t;
+        if (external.flight + 1e-8 < external.hitT) return;
+        external.state = 'received';
+        external.receivedAt = state.time;
+        state.stats.received++;
+      }
+      if (external.state === 'received') {
+        const hold = cfg.external.receiveHold;
+        const u = hold <= 0 ? 1 : clamp((state.time - external.receivedAt) / hold, 0, 1);
         const ease = u * u * (3 - 2 * u);
-        external.position.x = external.entryFrom.x +
-          (external.entryTo.x - external.entryFrom.x) * ease;
-        external.position.y = external.entryFrom.y +
-          (external.entryTo.y - external.entryFrom.y) * ease;
-        external.position.z = external.entryFrom.z +
-          (external.entryTo.z - external.entryFrom.z) * ease;
-        if (u >= 1) {
-          external.state = 'network';
-          if (external.route.length) placeOnRoute(external);
-          else external.active = false;
-        }
+        const hit = external.hit;
+        external.position.x = hit.rayX + (hit.meshX - hit.rayX) * ease;
+        external.position.y = hit.rayY + (hit.meshY - hit.rayY) * ease;
+        external.position.z = hit.rayZ + (hit.meshZ - hit.rayZ) * ease;
+        if (u < 1) return;
+        acceptSensation();
         return;
       }
       advanceRoute(external, dt);
@@ -405,6 +782,7 @@
       home.age = 0;
       home.scale = 1;
       home.node = nodeId;
+      home.blockedSchwann = 0;
       home.settledAt = -1;
       home.route = [];
       home.routeIndex = 0;
@@ -447,11 +825,13 @@
     }
 
     function settleHome(home, nodeId) {
+      if (home.state === 'settled') return;
       home.state = 'settled';
       home.node = nodeId;
       home.settledAt = state.time;
       home.route = [];
       setAtNode(home, nodeId);
+      blockSchwannCells(home, nodeId);
     }
 
     function stepMigration(home, dt) {

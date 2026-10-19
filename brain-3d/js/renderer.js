@@ -16,7 +16,6 @@
     const somaCfg = config.soma;
     const schwannCfg = config.schwann;
     const thoughtCfg = config.thoughts;
-    const yawRate = config.spin.degreesPerSecond * Math.PI / 180;
     const BASE = 10;
 
     const background = new Path.Rectangle(paper.view.bounds);
@@ -159,10 +158,12 @@
     const daySoma = new paper.Color(colors.soma);
     const daySomaEdge = new paper.Color(colors.somaEdge);
     const daySchwann = new paper.Color(colors.schwann);
+    const daySaturatedSchwann = new paper.Color(colors.saturatedSchwann);
     const dayText = new paper.Color(colors.text);
     const nightSoma = new paper.Color(colors.nightSoma);
     const nightSomaEdge = new paper.Color(colors.nightSomaEdge);
     const nightSchwann = new paper.Color(colors.nightSchwann);
+    const nightSaturatedSchwann = new paper.Color(colors.nightSaturatedSchwann);
     const nightText = new paper.Color(colors.nightText);
     const mood = {
       center: new paper.Color(colors.bgCenter),
@@ -247,13 +248,24 @@
       const somaFill = mixColor(daySoma, nightSoma, mood.dark);
       const somaEdge = mixColor(daySomaEdge, nightSomaEdge, mood.dark);
       const axon = mixColor(daySchwann, nightSchwann, mood.dark);
+      const saturatedAxon = mixColor(
+        daySaturatedSchwann,
+        nightSaturatedSchwann,
+        mood.dark
+      );
       for (let i = 0; i < cells.length; i++) {
         const soma = neurons[i].category >= 0 ? cells[i].children[1] : cells[i].children[0];
         soma.fillColor = somaFill;
         if (neurons[i].category < 0) soma.strokeColor = somaEdge;
       }
       for (let i = 0; i < schwannCells.length; i++) {
-        for (let j = 0; j < schwannCells[i].length; j++) schwannCells[i][j].strokeColor = axon;
+        for (let j = 0; j < schwannCells[i].length; j++) {
+          const saturated = simulation.saturatedSchwann[i][j];
+          schwannCells[i][j].strokeColor = saturated ? saturatedAxon : axon;
+          schwannCells[i][j].strokeWidth = saturated
+            ? schwannCfg.saturatedStrokeWidth
+            : schwannCfg.strokeWidth;
+        }
       }
       readout.fillColor = mixColor(dayText, nightText, mood.dark);
       document.body.style.background = hexColor(mood.center);
@@ -376,9 +388,20 @@
       stats.housed = simulation.stats.housed;
     }
 
+    function sensationLabel() {
+      const item = simulation.external;
+      if (!item.active) return '';
+      if (item.state === 'approaching') return ' · sensation approaching';
+      if (item.state === 'received') return ' · sensation received';
+      if (item.accepted) return ' · sensation accepted';
+      return '';
+    }
+
     function statusText(includePerformance) {
-      let text = stats.neurons + ' neurons · ' + simulation.phase + ' · ' +
-        stats.temporaryHomes + ' housed · ' + stats.activeThoughts + ' moving';
+      let text = stats.neurons + ' neurons · ' + simulation.phase +
+        sensationLabel() + ' · ' +
+        stats.temporaryHomes + ' housed · ' + stats.activeThoughts + ' moving · ' +
+        Math.round(simulation.saturation * 100) + '% saturated';
       if (includePerformance) {
         text += ' · ' + stats.avgMs.toFixed(2) + ' ms update · ' +
           stats.fps.toFixed(0) + ' fps';
@@ -388,7 +411,11 @@
 
     function draw(dt) {
       const t0 = now();
-      yaw += yawRate * dt;
+      const fullRate = config.spin.degreesPerSecond;
+      const minRate = config.spin.minDegreesPerSecond;
+      const spinDps = minRate + (fullRate - minRate) *
+        Math.pow(1 - simulation.saturation, config.spin.slowdownPower);
+      yaw += spinDps * Math.PI / 180 * dt;
       updateMood();
       project();
 

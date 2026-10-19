@@ -53,7 +53,11 @@
         undersideCompression: 0.32
       }
     },
-    spin: { degreesPerSecond: 6 },
+    spin: {
+      degreesPerSecond: 6,
+      minDegreesPerSecond: 0.6,
+      slowdownPower: 1.25
+    },
     camera: {
       // Distance from the eye to the origin, in skeleton units.
       distance: 4.2,
@@ -68,6 +72,7 @@
       somaEdge: '#294b8b',
       nucleus: '#f2f8fd',
       schwann: '#78a8d2',
+      saturatedSchwann: '#ad1457',
       anchorRing: '#2e7d32',
       external: '#e53935',
       externalCore: '#ffebee',
@@ -88,6 +93,7 @@
       nightSoma: '#d5e6f6',
       nightSomaEdge: '#9ec0e4',
       nightSchwann: '#c5d8ea',
+      nightSaturatedSchwann: '#d8a7e5',
       nightText: '#e7f0f8',
       text: '#22407e'
     },
@@ -114,6 +120,7 @@
       // Fraction of each cell slot left empty between neighboring cells.
       gapRatio: 0.22,
       strokeWidth: 2.2,
+      saturatedStrokeWidth: 4,
       // Lateral step of the zigzag, in skeleton units, capped by axon length.
       zigzag: 0.022,
       zigzagLength: 0.16
@@ -129,8 +136,13 @@
         ttl: 12,
         speed: 0.34,
         radius: 0.052,
-        entryDuration: 0.9,
-        entryDistance: 1.3,
+        // Straight flight from outside the shell toward the brain center.
+        approachSpeed: 1.05,
+        approachGap: 1.2,
+        // First mesh contact within this radius is "sensation received".
+        contactRadius: 0.22,
+        // Received rests on the strand, then acceptance starts mesh travel.
+        receiveHold: 0.65,
         entryScale: 3.4,
         shrinkPower: 1.1
       },
@@ -150,6 +162,10 @@
       temporary: {
         scale: 2,
         growDuration: 0.35
+      },
+      saturation: {
+        // A permanent thought blocks one clockwise run of this many cells.
+        blockCounts: [1, 2, 3, 5]
       }
     }
   };
