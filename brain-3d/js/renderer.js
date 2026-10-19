@@ -403,6 +403,16 @@
       stats.housed = simulation.stats.housed;
     }
 
+    function phaseLabel() {
+      if (simulation.phase === 'awake') return 'fresh awake';
+      if (simulation.phase === 'sleep-needed') return 'overloaded';
+      if (simulation.phase === 'stage1') return 'winding down';
+      if (simulation.phase === 'rem') return 'REM sleep';
+      if (simulation.phase === 'deep') return 'deep sleep';
+      if (simulation.phase === 'waking') return 'waking';
+      return simulation.phase;
+    }
+
     function sensationLabel() {
       const item = simulation.external;
       if (!item.active) return '';
@@ -424,7 +434,7 @@
           stats.fps.toFixed(0) + ' fps';
       }
       return stats.neurons + ' neurons · age ' + simulation.age.toFixed(1) +
-        ' · ' + simulation.phase + sensationLabel() +
+        ' · ' + phaseLabel() + sensationLabel() +
         '\n' + detail;
     }
 
