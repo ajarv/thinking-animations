@@ -117,7 +117,8 @@
       fontSize: 13,
       leading: 18,
       fontFamily: 'Georgia, serif',
-      content: ''
+      content: '',
+      visible: false
     });
 
     const projected = neurons.map(function () { return { x: 0, y: 0, z: 0, s: 1 }; });

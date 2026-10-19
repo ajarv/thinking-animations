@@ -8,6 +8,7 @@
   const skeleton = B3.createSkeleton(B3.config);
   const simulation = B3.createSimulation(skeleton, B3.config);
   const renderer = B3.createRenderer(paper, skeleton, B3.config, simulation);
+  const hud = B3.createHud(B3.config, simulation);
   const fixedStep = B3.config.thoughts.fixedStep;
   root.brain3d = {
     skeleton: skeleton,
@@ -30,6 +31,7 @@
     advanceSimulation(seconds);
     renderer.draw(seconds);
     renderer.draw(0);
+    hud.update();
     paper.view.update();
     return;
   }
@@ -100,7 +102,7 @@
     setPaused(!paused);
   });
   root.addEventListener('keydown', function (event) {
-    if (event.code !== 'Space' || event.target === toggle) return;
+    if (event.code !== 'Space' || event.target === toggle || event.target.tagName === 'BUTTON') return;
     event.preventDefault();
     setPaused(!paused);
   });
@@ -114,6 +116,7 @@
       accumulator -= fixedStep;
     }
     renderer.draw(delta);
+    hud.update();
   };
   root.brain3d.paused = function () { return paused; };
 })(window);

@@ -53,6 +53,16 @@
         undersideCompression: 0.32
       }
     },
+    ageBands: [
+      { name: 'Early childhood', max: 5 },
+      { name: 'Childhood', max: 12 },
+      { name: 'Adolescence', max: 18 },
+      { name: 'Early adulthood', max: 25 },
+      { name: 'Adulthood', max: 40 },
+      { name: 'Middle age', max: 60 },
+      { name: 'Later life', max: 80 },
+      { name: 'Elder years', max: 101 }
+    ],
     spin: {
       // Ten rotations make a 100-year life. Saturation accelerates the
       // toilet-roll clock from a fixed minimum to a fixed maximum.

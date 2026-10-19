@@ -80,7 +80,7 @@ Then open `http://127.0.0.1:8123/`. The Pause button at the bottom right freezes
 
 ## Performance readout
 
-The top left shows age, phase, and sensation state on the first line. The second line shows housed thoughts, moving thoughts, blocked Schwann cells, saturation, represented years per minute, and scene-update time. It refreshes every half second.
+The top left holds the same kind of status card as the 2D brain: saturation, age and life stage, sleep state, housed and moving thoughts, and years per minute. Hide collapses it to a Show controls button. `?hud=0` starts it hidden and `?hud=1` starts it open.
 
 Other URL options:
 
@@ -103,4 +103,5 @@ That remains well under the 16.7 ms budget for 60 frames per second. Axon and ne
 - `js/skeleton.js` builds the brain surface, graph adjacency, shared zigzag edge geometry, and 13 domain centers.
 - `js/simulation.js` runs the saturation-driven life clock, inbound sensations, saturation-dependent internal bursts, seeded distress events, graph travel, second-half-life fading, housing, and clockwise Schwann saturation with pooled state.
 - `js/renderer.js` creates all Paper items once, then projects and depth-sorts neurons and beads while reusing the shared edge geometry.
+- `js/hud.js` updates the top-left status card.
 - `js/main.js` advances the simulation at fixed 1/60-second steps and provides bench and deterministic still modes.
