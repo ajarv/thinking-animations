@@ -76,7 +76,7 @@
     // clockwise. Saturation walks around that order, then moves one Schwann
     // cell farther from the neuron and walks around again.
     const schwannCount = config.schwann.cellsPerAxon;
-    const blockCounts = cfg.saturation.blockCounts;
+    const saturationCfg = cfg.saturation;
     const schwannTotal = edges.length * schwannCount;
     const maxInternals = cfg.external.sizes.reduce(function (max, band) {
       return Math.max(max, band.internals);
@@ -143,6 +143,89 @@
       }
       return order;
     });
+    const saturationWalks = new Array(neurons.length);
+    const saturationCursors = new Uint16Array(neurons.length);
+
+    function saturationWalk(nodeId) {
+      if (saturationWalks[nodeId]) return saturationWalks[nodeId];
+      const order = [];
+      const queue = [nodeId];
+      const seenNodes = new Uint8Array(neurons.length);
+      const seenCells = new Uint8Array(schwannTotal);
+      seenNodes[nodeId] = 1;
+      let read = 0;
+      while (read < queue.length) {
+        const current = queue[read++];
+        const local = saturationOrder[current];
+        const queuedEdges = {};
+        for (let i = 0; i < local.length; i++) {
+          const candidate = local[i];
+          const key = candidate.edge * schwannCount + candidate.cell;
+          if (!seenCells[key]) {
+            seenCells[key] = 1;
+            order.push(candidate);
+          }
+          if (queuedEdges[candidate.edge]) continue;
+          queuedEdges[candidate.edge] = true;
+          const edge = edges[candidate.edge];
+          const next = edge.a === current ? edge.b : edge.a;
+          if (!seenNodes[next]) {
+            seenNodes[next] = 1;
+            queue.push(next);
+          }
+        }
+      }
+      saturationWalks[nodeId] = order;
+      return order;
+    }
+
+    function ageFromSaturation(value) {
+      if (value <= 0) return 0;
+      const ratio = clamp(value / saturationCfg.ceiling, 0, 0.999999);
+      const progress = -Math.log(1 - ratio) / saturationCfg.ageRate;
+      return clamp(
+        saturationCfg.ageAtTarget *
+          Math.pow(progress, 1 / saturationCfg.agePower),
+        0,
+        saturationCfg.maxAge
+      );
+    }
+
+    function sensationRate(age) {
+      const rates = saturationCfg.sensationRates;
+      if (age <= rates[0].age) return rates[0].perYear;
+      for (let i = 1; i < rates.length; i++) {
+        if (age > rates[i].age) continue;
+        const a = rates[i - 1];
+        const b = rates[i];
+        const t = (age - a.age) / (b.age - a.age);
+        return a.perYear + (b.perYear - a.perYear) * t;
+      }
+      return rates[rates.length - 1].perYear;
+    }
+
+    function sensationIntervalForAge(age) {
+      const birthRate = saturationCfg.sensationRates[0].perYear;
+      return saturationCfg.birthInterval * birthRate / sensationRate(age);
+    }
+
+    function blockSizeForSaturation(value) {
+      const room = clamp(
+        (saturationCfg.ceiling - value) / saturationCfg.ceiling,
+        0,
+        1
+      );
+      const ideal = Math.max(
+        1,
+        saturationCfg.maxBlock * Math.pow(room, saturationCfg.blockPower)
+      );
+      let selected = saturationCfg.fibonacci[0];
+      for (let i = 1; i < saturationCfg.fibonacci.length; i++) {
+        if (saturationCfg.fibonacci[i] > ideal + 1e-9) break;
+        selected = saturationCfg.fibonacci[i];
+      }
+      return selected;
+    }
 
     const external = {
       active: false,
@@ -211,6 +294,7 @@
       serial: 0,
       cohortActive: false,
       nextSpawn: cfg.spawnDelay,
+      lastSpawnAt: -Infinity,
       phase: 'awake',
       phaseBlend: 0,
       asleep: false,
@@ -223,6 +307,8 @@
       unsettled: 0,
       crystallized: 0,
       saturation: 0,
+      age: 0,
+      sensationRate: sensationRate(0),
       threshold: config.sleep.anchors[0].u,
       calculatedRemSeconds: 0,
       deepTargetSeconds: 0,
@@ -249,13 +335,16 @@
     };
 
     function saturateNextSchwann(nodeId) {
-      const order = saturationOrder[nodeId];
-      for (let i = 0; i < order.length; i++) {
+      const order = saturationWalk(nodeId);
+      for (let i = saturationCursors[nodeId]; i < order.length; i++) {
+        saturationCursors[nodeId] = i + 1;
         const candidate = order[i];
         if (saturatedSchwann[candidate.edge][candidate.cell]) continue;
         saturatedSchwann[candidate.edge][candidate.cell] = true;
         state.stats.saturated++;
         state.saturation = state.stats.saturated / schwannTotal;
+        state.age = ageFromSaturation(state.saturation);
+        state.sensationRate = sensationRate(state.age);
         state.stats.latestSaturated = {
           node: nodeId,
           edge: candidate.edge,
@@ -267,7 +356,7 @@
     }
 
     function blockSchwannCells(home, nodeId) {
-      const requested = blockCounts[Math.floor(rng() * blockCounts.length)];
+      const requested = blockSizeForSaturation(state.saturation);
       let blocked = 0;
       for (let i = 0; i < requested; i++) {
         if (!saturateNextSchwann(nodeId)) break;
@@ -661,6 +750,7 @@
 
     function spawnCohort() {
       const cohortSerial = ++state.serial;
+      state.lastSpawnAt = state.time;
       const z = rng() * 2 - 1;
       const theta = rng() * Math.PI * 2;
       const ring = Math.sqrt(Math.max(0, 1 - z * z));
@@ -1076,7 +1166,12 @@
       stepHomes(dt);
       if (state.cohortActive && !external.active && activeInternals() === 0) {
         state.cohortActive = false;
-        if (!state.asleep) state.nextSpawn = state.time + cfg.spawnDelay;
+        if (!state.asleep) {
+          state.nextSpawn = Math.max(
+            state.time + cfg.spawnDelay,
+            state.lastSpawnAt + sensationIntervalForAge(state.age)
+          );
+        }
       }
       updateSleep(dt);
     }

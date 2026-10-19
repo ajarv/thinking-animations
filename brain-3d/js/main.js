@@ -82,7 +82,31 @@
   }
 
   let accumulator = 0;
+  let paused = false;
+  const toggle = document.createElement('button');
+  toggle.id = 'play-toggle';
+  toggle.type = 'button';
+  toggle.textContent = 'Pause';
+  toggle.setAttribute('aria-pressed', 'false');
+  document.body.appendChild(toggle);
+
+  function setPaused(next) {
+    paused = next;
+    toggle.textContent = paused ? 'Resume' : 'Pause';
+    toggle.setAttribute('aria-pressed', paused ? 'true' : 'false');
+  }
+
+  toggle.addEventListener('click', function () {
+    setPaused(!paused);
+  });
+  root.addEventListener('keydown', function (event) {
+    if (event.code !== 'Space' || event.target === toggle) return;
+    event.preventDefault();
+    setPaused(!paused);
+  });
+
   paper.view.onFrame = function (event) {
+    if (paused) return;
     const delta = Math.min(event.delta, 0.05);
     accumulator += delta;
     while (accumulator >= fixedStep) {
@@ -91,4 +115,5 @@
     }
     renderer.draw(delta);
   };
+  root.brain3d.paused = function () { return paused; };
 })(window);

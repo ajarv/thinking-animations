@@ -72,7 +72,7 @@
       somaEdge: '#294b8b',
       nucleus: '#f2f8fd',
       schwann: '#78a8d2',
-      saturatedSchwann: '#81c784',
+      saturatedSchwann: '#f4c542',
       anchorRing: '#2e7d32',
       external: '#e53935',
       externalCore: '#ffebee',
@@ -93,7 +93,7 @@
       nightSoma: '#d5e6f6',
       nightSomaEdge: '#9ec0e4',
       nightSchwann: '#c5d8ea',
-      nightSaturatedSchwann: '#c8e6c9',
+      nightSaturatedSchwann: '#ffe082',
       nightText: '#e7f0f8',
       text: '#22407e'
     },
@@ -171,8 +171,27 @@
         growDuration: 0.35
       },
       saturation: {
-        // A permanent thought blocks one clockwise run of this many cells.
-        blockCounts: [1, 2, 3, 5]
+        // Select the largest Fibonacci block below the saturation-dependent
+        // ideal. The calibrated age curve maps 80% saturation to age 50.
+        fibonacci: [1, 2, 3, 5, 8, 13, 21, 34],
+        maxBlock: 34,
+        ceiling: 0.84,
+        blockPower: 1.15,
+        ageAtTarget: 50,
+        ageRate: 3.044522,
+        agePower: 1.35,
+        maxAge: 100,
+        // Relative sensation frequency, linearly interpolated by age.
+        birthInterval: 10,
+        sensationRates: [
+          { age: 0, perYear: 10.1 },
+          { age: 8, perYear: 7.4 },
+          { age: 16, perYear: 5.1 },
+          { age: 24, perYear: 3.6 },
+          { age: 50, perYear: 3.0 },
+          { age: 70, perYear: 2.3 },
+          { age: 100, perYear: 1.6 }
+        ]
       }
     }
   };

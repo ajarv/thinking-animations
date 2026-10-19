@@ -39,9 +39,9 @@ The night uses the 2D duration rule. Five unsettled homes start an 18-hour night
 - Awake is light blue. As temporary homes approach the threshold, the background warms toward light red.
 - Stage 1 is pale lavender. It lasts until the sensation already traveling has faded or found a home. No new sensation starts.
 - REM is very light green. It lasts at least half the calculated night, and longer if a temporary home is still walking to its domain center. Those homes travel at three times the daytime speed, then settle light green at their regular size.
-- As each thought reaches its permanent home, it blocks a seeded-random group of 1, 2, 3, or 5 adjoining Schwann cells, which turn light green. Selection proceeds clockwise around that neuron, starting with the cells nearest the soma before moving outward.
+- As each thought reaches its permanent home, it blocks a Fibonacci-sized group of Schwann cells, which turn yellow. At low saturation it can claim 34 cells; the largest allowed group falls through 21, 13, 8, 5, 3, 2, and 1 as saturation grows. Selection proceeds clockwise from the permanent-home neuron and expands through neighboring neurons when the local cells are full.
 - Deep sleep is dark gray and lasts exactly the calculated half, even when REM ran longer. The neurons brighten so they stay visible.
-- Saturation is the blocked Schwann cells divided by every Schwann cell. The brain starts at 6° per second and slows toward 0.6° per second as that percentage rises.
+- Saturation is the blocked Schwann cells divided by every Schwann cell. A calibrated biological-age curve maps 80% saturation to age 50 and approaches an 84% ceiling. Sensations arrive most often at age 0; their spacing grows as the displayed age rises. The brain starts at 6° per second and slows toward 0.6° per second as saturation rises.
 
 ![Deep sleep after the temporary homes have settled](screenshots/deep.png)
 - Waking eases from dark gray back to light blue.
@@ -55,7 +55,7 @@ cd brain-3d
 python3 -m http.server 8123 --bind 127.0.0.1
 ```
 
-Then open `http://127.0.0.1:8123/`.
+Then open `http://127.0.0.1:8123/`. The Pause button at the bottom right freezes the thoughts and the rotation; Resume continues from that moment. The space bar does the same while the button is not focused.
 
 ## Performance readout
 

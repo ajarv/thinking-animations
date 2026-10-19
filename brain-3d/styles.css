@@ -10,3 +10,26 @@ html, body {
   width: 100vw;
   height: 100vh;
 }
+
+#play-toggle {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 2;
+  border: 1px solid #294b8b;
+  border-radius: 999px;
+  background: rgba(246, 251, 255, 0.94);
+  color: #22407e;
+  font-family: Georgia, serif;
+  font-size: 16px;
+  line-height: 1;
+  padding: 12px 20px;
+  cursor: pointer;
+}
+
+#play-toggle:hover,
+#play-toggle:focus-visible {
+  background: #ffffff;
+  outline: 2px solid #294b8b;
+  outline-offset: 3px;
+}

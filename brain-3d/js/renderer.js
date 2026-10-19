@@ -423,7 +423,8 @@
         detail += ' · ' + stats.avgMs.toFixed(2) + ' ms · ' +
           stats.fps.toFixed(0) + ' fps';
       }
-      return stats.neurons + ' neurons · ' + simulation.phase + sensationLabel() +
+      return stats.neurons + ' neurons · age ' + simulation.age.toFixed(1) +
+        ' · ' + simulation.phase + sensationLabel() +
         '\n' + detail;
     }
 
