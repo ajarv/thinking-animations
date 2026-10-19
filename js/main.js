@@ -14,7 +14,8 @@
     const count = config.network.count;
     const spec = search.get('aspect');
     const pair = spec && /^(\d+)x(\d+)$/i.exec(spec);
-    if (pair && +pair[1] * +pair[2] === count) return { cols: +pair[1], rows: +pair[2] };
+    // 16x9 is a viewport shape, not a forced rectangle. 233 is prime.
+    if (pair) return PL.chooseLattice(count, +pair[1], +pair[2]);
     if (spec && isFinite(parseFloat(spec))) return PL.chooseLattice(count, parseFloat(spec), 1);
     return PL.chooseLattice(count, root.innerWidth || 1440, root.innerHeight || 900);
   }
@@ -41,7 +42,7 @@
 
   // URL parameters. Sleep is automatic. lust=0..100 forces a starting value
   // that then slides back toward the natural equilibrium.
-  //   aspect=16x9  force a lattice whose product is network.count
+  //   aspect=16x9  choose the staggered lattice for that viewport shape
   //   t=N      start N simulated seconds into a life
   //   still=1  freeze on that frame
   //   lust=N   start with lust forced to N

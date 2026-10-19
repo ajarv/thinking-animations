@@ -24,32 +24,60 @@
     };
   }
 
-  // Exact factor pairs of `count`. The pair whose cols/rows is closest to
-  // the viewport's width/height wins, so a wide window is not a stretched
-  // square. Both orientations are candidates (16×9 and 9×16).
+  // Row count for a staggered lattice of exactly `count` neurons. 233 is
+  // prime, so this does not look for a rectangular factor pair. R is chosen
+  // near sqrt(count / viewportAspect). Among nearby integers, the winner is
+  // the one whose nominal pixel pitch is closest on both axes under a
+  // uniform fit (screen-space spacing error).
   PL.chooseLattice = function (count, width, height) {
     const aspect = width / Math.max(height, 0.001);
+    const ideal = Math.sqrt(count / aspect);
+    const lo = Math.max(2, Math.floor(ideal) - 8);
+    const hi = Math.min(Math.floor(count / 2), Math.ceil(ideal) + 8);
     let best = null;
     let bestScore = Infinity;
-    for (let cols = 1; cols <= count; cols++) {
-      if (count % cols !== 0) continue;
-      const rows = count / cols;
-      const latticeAspect = cols / rows;
-      const score = Math.abs(Math.log(latticeAspect / aspect));
-      const squarer = best && Math.abs(cols - rows) < Math.abs(best.cols - best.rows);
-      if (score < bestScore - 1e-12 || (Math.abs(score - bestScore) <= 1e-12 && squarer)) {
+    for (let rows = lo; rows <= hi; rows++) {
+      const base = Math.floor(count / rows);
+      if (base < 2) continue;
+      const extra = count % rows;
+      const cols = base + (extra > 0 ? 1 : 0);
+      if (cols < 2) continue;
+      const scaleX = width / cols;
+      const scaleY = height / rows;
+      const pitchErr = Math.abs(scaleX - scaleY) / Math.max(scaleX, scaleY);
+      const score = pitchErr + Math.abs(rows - ideal) * 1e-6;
+      if (score < bestScore) {
         bestScore = score;
-        best = { cols: cols, rows: rows, aspect: latticeAspect };
+        best = { cols: cols, rows: rows, aspect: cols / rows, base: base, extra: extra };
       }
     }
     return best;
   };
 
+  // Longer rows (base+1) are spread from top to bottom, not bunched.
+  PL.staggeredRowLengths = function (count, rows) {
+    const base = Math.floor(count / rows);
+    const extra = count % rows;
+    const lengths = [];
+    let err = 0;
+    for (let r = 0; r < rows; r++) {
+      err += extra;
+      if (err >= rows) {
+        err -= rows;
+        lengths.push(base + 1);
+      } else {
+        lengths.push(base);
+      }
+    }
+    return lengths;
+  };
+
   PL.config = {
-    // 144 neurons. The cols × rows lattice is chosen from the viewport
-    // aspect when the page loads; a resize only refits the scale.
+    // 233 neurons, a prime, so the lattice is staggered rows rather than a
+    // rectangle. The row count follows the viewport aspect at load; a
+    // resize only refits the scale.
     network: {
-      count: 144,
+      count: 89,
       // Jitter amplitude, as a fraction of the one-unit lattice spacing.
       jitterMin: 0.22,
       jitterMax: 0.30,
@@ -60,7 +88,7 @@
     pools: {
       thoughts: 144,
       // Acceptance bursts are 7 and home ticks are at most 3. The first night
-      // on 16×9 drops none.
+      // on the wide lattice drops none.
       counters: 610,
       // Crystal slots, not neurons. The sleep threshold is a share of this
       // pool, so it stays at 377 to keep the first night about 18s in.
@@ -68,8 +96,12 @@
     },
 
     life: {
-      maxAge: 100,
+      // Age 90 is the plateau once purple coverage reaches 95%.
+      maxAge: 90,
+      // Border filters and natural lust still treat 80% coverage as maturity.
+      // It is not the end of life.
       saturationLimit: 0.8,
+      plateau: 0.95,
       epsilon: 0.001,
       growthFloor: 0.2,
       hold: 3
@@ -142,7 +174,9 @@
 
     sleep: {
       // One simulated second per this many hours of the sleep-duration
-      // function. 18 hours is 36 seconds: 18 REM and 18 deep.
+      // function. 18 hours is 36 seconds: 18 of calculated REM and 18 of
+      // deep. Actual REM lasts at least that half, and longer if the onset
+      // cohort is still unsettled.
       secondsPerHour: 2,
       // Kept so older notes still parse. Onset is unsettled vs crystallized,
       // not this share of the crystal pool, and there is no minimum afternoon.
@@ -230,13 +264,15 @@
     ],
 
     colors: {
-      // Background cycle: light blue rested, light red sleep-starved, very
-      // light green REM, dark gray deep sleep, then light blue again. REM
-      // stays far paler than the settled thought beads.
+      // Background cycle: light blue rested, light red sleep-starved, pale
+      // lavender Stage 1, very light green REM, dark gray deep sleep, then
+      // light blue again. REM stays far paler than the settled thought beads.
       bgCenter: '#f6fbff',
       bgEdge: '#d8eaf7',
       needCenter: '#fff1f1',
       needEdge: '#f6d5d5',
+      stage1Center: '#f4f0fb',
+      stage1Edge: '#e4dcf3',
       remCenter: '#f3fbf4',
       remEdge: '#d9f0dc',
       deepCenter: '#4f535a',

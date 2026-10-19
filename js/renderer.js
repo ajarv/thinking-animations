@@ -238,6 +238,7 @@
           edge: mix(C.bgEdge, C.needEdge, blend)
         };
       }
+      if (snap.phase === 'stage1') return { center: C.stage1Center, edge: C.stage1Edge };
       if (snap.phase === 'rem') return { center: C.remCenter, edge: C.remEdge };
       if (snap.phase === 'deep') return { center: C.deepCenter, edge: C.deepEdge };
       if (snap.phase === 'waking') {

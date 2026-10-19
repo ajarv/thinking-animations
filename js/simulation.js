@@ -74,6 +74,8 @@
         inwardRow: 0,
         housingRoll: 0,
         rejected: false,
+        stage1Sleep: -1,
+        stage1Born: -1,
         x: 0,
         y: 0
       };
@@ -115,6 +117,8 @@
         tossAge: 0,
         tossTtl: 1,
         daySpeed: 1,
+        cohortSleep: -1,
+        cohortBorn: -1,
         nextInternal: Infinity,
         internalEvery: 0,
         angleA: 0,
@@ -158,6 +162,12 @@
     };
     let centers = [];
     let asleep = false;
+    // Thoughts that were unsettled when this sleep began. Object identity
+    // plus bornAt, so a recycled pool slot cannot stay in the cohort.
+    let remCohort = [];
+    // External thoughts still traveling when sleep began. Identity is the
+    // pool object plus bornAt, so a reused slot cannot hold Stage 1 open.
+    let stage1Cohort = [];
     const STAGES = config.stages;
     const LUST = config.lust;
     const SECONDS_PER_HOUR = SLEEP.secondsPerHour || 2;
@@ -247,6 +257,19 @@
       return Math.max(SLEEP_ANCHORS[0].u, Math.round(SLEEP_ANCHORS[0].u * crystallized / CATEGORY_COUNT));
     }
 
+    function cohortOpen(c) {
+      return c.cohortSleep === s.sleeps && c.bornAt === c.cohortBorn && c.active &&
+        (c.state === 'temporary' || c.state === 'wandering');
+    }
+
+    function remRemainingCount() {
+      let n = 0;
+      for (let i = 0; i < remCohort.length; i++) {
+        if (cohortOpen(remCohort[i])) n++;
+      }
+      return n;
+    }
+
     function refreshSleepCounts() {
       s.crystallized = crystallizedCount();
       s.unsettled = unsettledCount();
@@ -254,6 +277,20 @@
       if (!asleep) {
         s.sleepHours = sleepHours(s.unsettled, s.crystallized);
         s.sleepSeconds = s.sleepHours * SECONDS_PER_HOUR;
+        s.remRemaining = 0;
+      } else {
+        s.remRemaining = remRemainingCount();
+      }
+    }
+
+    // If migration ever misses a kept cohort thought, start it wandering.
+    // Wandering already ends at the anchor or at maxTravel. Nothing is tossed
+    // here just to finish the clock.
+    function releaseStuckCohort() {
+      for (let i = 0; i < remCohort.length; i++) {
+        const c = remCohort[i];
+        if (!cohortOpen(c) || c.state !== 'temporary') continue;
+        if (c.kept) startWandering(c, classify(c, c.site), c.site);
       }
     }
 
@@ -264,7 +301,7 @@
     }
 
     function housingChance() {
-      return clamp(s.lust / 100, 0, 1);
+      return clamp((s.lust / 100) * learningRate(s.age), 0, 1);
     }
 
     function stepLust(dt) {
@@ -340,6 +377,60 @@
       return clamp(strongest * 0.72 + sum / adjacent.length * 0.28, 0, 1);
     }
 
+    // Saturation to age. The rising anchors are the table's coverage column.
+    // 95% and anything above it is age 90; the age-80 row shares that plateau.
+    const SAT_AGE = [
+      { sat: 0, age: 0 },
+      { sat: 0.25, age: 10 },
+      { sat: 0.50, age: 20 },
+      { sat: 0.68, age: 30 },
+      { sat: 0.78, age: 40 },
+      { sat: 0.85, age: 50 },
+      { sat: 0.90, age: 60 },
+      { sat: 0.93, age: 70 },
+      { sat: 0.95, age: 90 }
+    ];
+    const RATE_AGE = [
+      { age: 0, rate: 1 },
+      { age: 10, rate: 0.95 },
+      { age: 20, rate: 0.70 },
+      { age: 30, rate: 0.50 },
+      { age: 40, rate: 0.40 },
+      { age: 50, rate: 0.35 },
+      { age: 60, rate: 0.30 },
+      { age: 70, rate: 0.20 },
+      { age: 80, rate: 0.12 },
+      { age: 90, rate: 0.05 }
+    ];
+
+    function ageFromSaturation(sat) {
+      if (sat <= SAT_AGE[0].sat) return SAT_AGE[0].age;
+      const last = SAT_AGE[SAT_AGE.length - 1];
+      if (sat >= last.sat) return last.age;
+      for (let i = 1; i < SAT_AGE.length; i++) {
+        const a = SAT_AGE[i - 1];
+        const b = SAT_AGE[i];
+        if (sat > b.sat) continue;
+        const t = (sat - a.sat) / (b.sat - a.sat);
+        return a.age + t * (b.age - a.age);
+      }
+      return last.age;
+    }
+
+    function learningRate(age) {
+      if (age <= RATE_AGE[0].age) return RATE_AGE[0].rate;
+      const last = RATE_AGE[RATE_AGE.length - 1];
+      if (age >= last.age) return last.rate;
+      for (let i = 1; i < RATE_AGE.length; i++) {
+        const a = RATE_AGE[i - 1];
+        const b = RATE_AGE[i];
+        if (age > b.age) continue;
+        const t = (age - a.age) / (b.age - a.age);
+        return a.rate + t * (b.rate - a.rate);
+      }
+      return last.rate;
+    }
+
     function lifeProgress() {
       return clamp(s.peakSaturation / LIFE.saturationLimit, 0, 1);
     }
@@ -352,9 +443,8 @@
       return 1 - smoothstep(0, 1, lifeProgress());
     }
 
-    // Age 0–100 maps to 0–90 degrees: growth is fast in youth and slows with
-    // age. Since age itself comes from saturation, a pure cosine would only
-    // approach the 80% limit asymptotically, so a small floor lets life end.
+    // Latent deposit still eases with age. The new-knowledge rate, not this
+    // cosine, decides whether a kept thought colors a Schwann cell.
     function growthFactor() {
       if (s.finishedAt >= 0) return 0;
       return Math.max(LIFE.growthFloor, Math.cos(s.age * 0.9 * Math.PI / 180) - 0.0001);
@@ -380,11 +470,8 @@
       const total = edges.length * SCHWANN;
       s.saturation = total ? s.purpleSchwannCells / total : 0;
       s.peakSaturation = Math.max(s.peakSaturation, s.saturation);
-      s.age = LIFE.maxAge * lifeProgress();
-      if (s.peakSaturation >= LIFE.saturationLimit - LIFE.epsilon) {
-        s.age = LIFE.maxAge;
-        if (s.finishedAt < 0) s.finishedAt = s.time;
-      }
+      s.age = ageFromSaturation(s.peakSaturation);
+      s.learningRate = learningRate(s.age);
 
       centers = [];
       for (let i = 0; i < neurons.length; i++) {
@@ -420,22 +507,22 @@
     }
 
     function movesInward(p, from, dest) {
-      const dc = dest.col - from.col;
-      const dr = dest.row - from.row;
-      if (p.inwardCol > 0 && dc < 0) return false;
-      if (p.inwardCol < 0 && dc > 0) return false;
-      if (p.inwardRow > 0 && dr < 0) return false;
-      if (p.inwardRow < 0 && dr > 0) return false;
-      if (p.inwardCol !== 0 && (dc === p.inwardCol || dc === 0)) return true;
-      if (p.inwardRow !== 0 && (dr === p.inwardRow || dr === 0)) return true;
+      const dc = dest.homeX - from.homeX;
+      const dr = dest.homeY - from.homeY;
+      if (p.inwardCol > 0 && dc < -0.15) return false;
+      if (p.inwardCol < 0 && dc > 0.15) return false;
+      if (p.inwardRow > 0 && dr < -0.15) return false;
+      if (p.inwardRow < 0 && dr > 0.15) return false;
+      if (p.inwardCol !== 0 && (dc * p.inwardCol > 0.15 || Math.abs(dc) <= 0.15)) return true;
+      if (p.inwardRow !== 0 && (dr * p.inwardRow > 0.15 || Math.abs(dr) <= 0.15)) return true;
       return false;
     }
 
     function reachedFarSide(p, node) {
-      if (p.inwardCol > 0 && node.col >= COLS - 1) return true;
-      if (p.inwardCol < 0 && node.col <= 0) return true;
-      if (p.inwardRow > 0 && node.row >= ROWS - 1) return true;
-      if (p.inwardRow < 0 && node.row <= 0) return true;
+      if (p.inwardCol > 0 && node.onRight) return true;
+      if (p.inwardCol < 0 && node.onLeft) return true;
+      if (p.inwardRow > 0 && node.onBottom) return true;
+      if (p.inwardRow < 0 && node.onTop) return true;
       return false;
     }
 
@@ -461,10 +548,10 @@
       const home = kind.home * lerp(0.12, 1, filters);
       let total = 0;
       const weights = options.map(function (option) {
-        const dc = option.dest.col - node.col;
-        const dr = option.dest.row - node.row;
-        const inwardStep = (p.inwardCol !== 0 && dc === p.inwardCol) ||
-          (p.inwardRow !== 0 && dr === p.inwardRow);
+        const dc = option.dest.homeX - node.homeX;
+        const dr = option.dest.homeY - node.homeY;
+        const inwardStep = (p.inwardCol !== 0 && dc * p.inwardCol > 0.15) ||
+          (p.inwardRow !== 0 && dr * p.inwardRow > 0.15);
         const knowledge = option.edge.strength * 0.62 + option.dest.strength * 0.38;
         const weight = (inwardStep ? 1.6 : 0.28) +
           home * 24 * knowledge * knowledge +
@@ -544,23 +631,18 @@
 
       const serial = s.serial++;
       const side = Math.floor(hash(serial, 1.3) * 4);
-      const slot = Math.floor(hash(serial, 2.7) * (side < 2 ? ROWS : COLS));
-      let start;
+      const border = side === 0 ? network.borders.left
+        : side === 1 ? network.borders.right
+        : side === 2 ? network.borders.top
+        : network.borders.bottom;
+      const slot = Math.floor(hash(serial, 2.7) * border.length);
+      const start = border[slot];
       p.inwardCol = 0;
       p.inwardRow = 0;
-      if (side === 0) {
-        start = network.nodeAt(0, slot);
-        p.inwardCol = 1;
-      } else if (side === 1) {
-        start = network.nodeAt(COLS - 1, slot);
-        p.inwardCol = -1;
-      } else if (side === 2) {
-        start = network.nodeAt(slot, 0);
-        p.inwardRow = 1;
-      } else {
-        start = network.nodeAt(slot, ROWS - 1);
-        p.inwardRow = -1;
-      }
+      if (side === 0) p.inwardCol = 1;
+      else if (side === 1) p.inwardCol = -1;
+      else if (side === 2) p.inwardRow = 1;
+      else p.inwardRow = -1;
 
       const kind = chooseKind(serial);
       const spec = KINDS[kind];
@@ -569,6 +651,8 @@
       p.age = 0;
       p.rejected = false;
       p.bornAt = s.time;
+      p.stage1Sleep = -1;
+      p.stage1Born = -1;
       p.ttl = lerp(spec.ttlMin, spec.ttlMax, hash(serial, 6.6)) * lerp(0.75, 1, riskAffinity());
       p.speed = lerp(130, 205, hash(serial, 9.1)) / 72 * spec.speed;
       s.born[kind]++;
@@ -824,6 +908,8 @@
       c.site = null;
       c.category = -1;
       c.nextInternal = Infinity;
+      c.cohortSleep = -1;
+      c.cohortBorn = -1;
       c.judged = false;
       c.kept = true;
       if (category >= 0) {
@@ -1534,12 +1620,17 @@
       }
     }
 
+    // A kept thought always gains a permanent home. It colors a Schwann cell
+    // only when a stable roll falls under the age's new-knowledge rate.
     function settle(c) {
       const anchor = anchors[c.category];
       c.state = 'settled';
       c.settledAt = s.time;
       c.site = anchor;
-      myelinateOne(c.category);
+      const rate = learningRate(s.age);
+      if (hash(c.id * 9.17 + c.bornAt * 0.13, s.sleeps * 2.2 + 4.4) < rate) {
+        myelinateOne(c.category);
+      }
       c.carried = 0;
       c.nextInternal = Infinity;
       settledCount[c.category]++;
@@ -1685,13 +1776,15 @@
       crystals.forEach(function (c) {
         if (!c.active) return;
         if (c.state === 'settled') glideSettled(c, dt);
-        else if (c.state === 'wandering' && asleep) moveWanderer(c, dt);
+        else if (c.state === 'wandering' && asleep && !s.inStage1) moveWanderer(c, dt);
         else if (c.state === 'tossed') {
           c.tossAge += dt;
           if (c.tossAge >= c.tossTtl) hideCrystal(c);
         }
       });
-      if (!asleep) return;
+      // Stage 1 still lets travelers fade or find a temporary home. Tossing,
+      // the flight to a permanent cluster, and rebalancing wait for REM.
+      if (!asleep || s.inStage1) return;
 
       // Detach fast enough that the night's backlog is on its way within the
       // first part of REM, however short this age makes the night.
@@ -1795,6 +1888,18 @@
         sleepRatio: 0,
         sleepTarget: 0,
         remTarget: 0,
+        inStage1: false,
+        stage1StartedAt: -1,
+        stage1Seconds: 0,
+        stage1Remaining: 0,
+        stage1CohortSize: 0,
+        stage1SafetyTrips: 0,
+        calculatedRemSeconds: 18,
+        actualRemSeconds: 0,
+        remCohortSize: 0,
+        remRemaining: 0,
+        deepTargetSeconds: 18,
+        remSafetyTrips: 0,
         keepChance: STAGES[0].keep,
         keptThisSleep: 0,
         tossedThisSleep: 0,
@@ -1807,6 +1912,8 @@
         wave.age = 0;
       });
       asleep = false;
+      remCohort = [];
+      stage1Cohort = [];
       edges.forEach(function (edge) {
         edge.seedAt = -1;
         edge.strength = 0;
@@ -1860,6 +1967,7 @@
     }
 
     function finishDeepWork() {
+      if (remRemainingCount() > 0) s.remSafetyTrips++;
       crystals.forEach(function (c) {
         if (!c.active || c.state !== 'temporary') return;
         if (judge(c)) startWandering(c, classify(c, c.site), c.site);
@@ -1908,16 +2016,76 @@
       else setPhase('awake', s.need);
     }
 
-    // Night length comes from unsettled and crystallized counts at onset,
-    // not from the awake bout. REM takes the first half and deep sleep the
-    // second, so deep equals the REM just finished.
+    // A Stage 1 thought is finished once it has faded, been rejected, been
+    // recycled, or found a temporary home (which clears active).
+    function stage1Open(p) {
+      return p.stage1Sleep === s.sleeps && p.bornAt === p.stage1Born &&
+        p.active && !p.rejected;
+    }
+
+    function stage1RemainingCount() {
+      let n = 0;
+      for (let i = 0; i < stage1Cohort.length; i++) {
+        if (stage1Open(stage1Cohort[i])) n++;
+      }
+      return n;
+    }
+
+    function captureStage1Cohort() {
+      stage1Cohort = [];
+      thoughts.forEach(function (p) {
+        if (!p.active) return;
+        p.stage1Sleep = s.sleeps;
+        p.stage1Born = p.bornAt;
+        stage1Cohort.push(p);
+      });
+      s.stage1CohortSize = stage1Cohort.length;
+      s.stage1Remaining = stage1RemainingCount();
+    }
+
+    // REM cohort is whoever holds a temporary or wandering home when Stage 1
+    // ends: homes that were already waiting, plus any thought that found a
+    // home during Stage 1. Faded travelers never become crystals.
+    function beginRem() {
+      s.inStage1 = false;
+      s.stage1Seconds = Math.max(0, s.time - s.stage1StartedAt);
+      s.stage1Remaining = 0;
+      remCohort = [];
+      crystals.forEach(function (c) {
+        if (!c.active) return;
+        if (c.state !== 'temporary' && c.state !== 'wandering') return;
+        c.cohortSleep = s.sleeps;
+        c.cohortBorn = c.bornAt;
+        remCohort.push(c);
+      });
+      s.remCohortSize = remCohort.length;
+      s.sleepBacklog = Math.max(1, remCohort.length);
+      s.remStartedAt = s.time;
+      s.remDuration = 0;
+      s.actualRemSeconds = 0;
+      s.deepDuration = 0;
+      s.keptThisSleep = 0;
+      s.tossedThisSleep = 0;
+      s.remSafetyNoted = false;
+      crystals.forEach(function (c) {
+        if (c.active) judge(c);
+      });
+      s.remRemaining = remRemainingCount();
+    }
+
+    // Night length is fixed from U and C at the original onset. Stage 1 lets
+    // travelers finish first. Calculated REM is half of that night, and deep
+    // sleep is exactly that half. Actual REM is at least the calculated half,
+    // and longer while the REM cohort is still temporary or wandering.
     function fallAsleep(pending) {
       const stage = stageAt(s.age);
       const unsettled = pending.temporary + pending.wandering;
       const crystallized = crystallizedCount();
       const hours = sleepHours(unsettled, crystallized);
       const seconds = hours * SECONDS_PER_HOUR;
+      const calculated = seconds / 2;
       asleep = true;
+      s.inStage1 = true;
       s.awakeDuration = s.stateTime;
       s.stateTime = 0;
       s.sleeps++;
@@ -1930,17 +2098,19 @@
       s.onsetUnsettled = unsettled;
       s.onsetCrystallized = crystallized;
       s.sleepTarget = seconds;
-      s.remTarget = seconds / 2;
-      s.sleepBacklog = Math.max(1, pending.temporary + pending.wandering);
-      s.remStartedAt = s.time;
-      s.remDuration = 0;
-      s.deepDuration = 0;
-      s.deepTarget = 0;
-      s.keptThisSleep = 0;
-      s.tossedThisSleep = 0;
-      crystals.forEach(function (c) {
-        if (c.active) judge(c);
-      });
+      s.calculatedRemSeconds = calculated;
+      s.remTarget = calculated;
+      s.deepTargetSeconds = calculated;
+      s.deepTarget = calculated;
+      s.actualRemSeconds = 0;
+      s.remCohortSize = 0;
+      s.remRemaining = 0;
+      remCohort = [];
+      s.stage1StartedAt = s.time;
+      s.stage1Seconds = 0;
+      s.stage1SafetyNoted = false;
+      s.housingsAtStage1 = s.crystallizations;
+      captureStage1Cohort();
     }
 
     function updateSleepState(dt) {
@@ -1953,36 +2123,67 @@
         s.inDeep = false;
         if (s.finishedAt < 0 && s.unsettled >= s.threshold) {
           fallAsleep(pending);
-        } else {
-          assignAwakePhase();
-          s.phaseElapsed = s.phase === 'waking' ? s.stateTime : 0;
+          s.phaseElapsed = 0;
+          setPhase('stage1', 0);
           return;
         }
+        assignAwakePhase();
+        s.phaseElapsed = s.phase === 'waking' ? s.stateTime : 0;
+        return;
+      }
+
+      if (s.inStage1) {
+        s.stage1Seconds = Math.max(0, s.time - s.stage1StartedAt);
+        s.stage1Remaining = stage1RemainingCount();
+        s.phaseElapsed = s.stage1Seconds;
+        if (s.stage1Remaining > 0 && s.stage1Seconds > 14 && !s.stage1SafetyNoted) {
+          s.stage1SafetyNoted = true;
+          s.stage1SafetyTrips++;
+        }
+        // The onset frame always shows Stage 1. An empty cohort leaves on
+        // the next substep, once stage1Seconds has moved.
+        if (s.stage1Remaining > 0 || s.stage1Seconds <= 0) {
+          setPhase('stage1', 1);
+          return;
+        }
+        beginRem();
       }
 
       if (s.inDeep) {
         s.deepDuration = s.time - s.deepStartedAt;
         s.phaseElapsed = s.deepDuration;
-        const span = Math.max(s.deepTarget, STEP);
+        const span = Math.max(s.deepTargetSeconds, STEP);
         setPhase('deep', clamp(s.deepDuration / span, 0, 1));
         s.reorganized = clamp(s.deepDuration / span, 0, 1);
-        if (s.deepDuration + 1e-8 >= s.deepTarget) wakeFromDeep();
+        if (s.deepDuration + 1e-8 >= s.deepTargetSeconds) wakeFromDeep();
         return;
       }
 
-      const remaining = pending.temporary + pending.wandering;
+      s.remRemaining = remRemainingCount();
+      const remaining = s.remRemaining;
       s.sleepBacklog = Math.max(s.sleepBacklog, remaining, 1);
       const travelShare = remaining / s.sleepBacklog;
       s.reorganized = clamp(1 - travelShare, 0, 1);
       s.remDuration = s.time - s.remStartedAt;
+      s.actualRemSeconds = s.remDuration;
       s.phaseElapsed = s.remDuration;
-      if (s.remDuration + 1e-8 < Math.max(s.remTarget, STEP)) {
+      const timeReached = s.remDuration + 1e-8 >= Math.max(s.calculatedRemSeconds, STEP);
+      if (s.remRemaining > 0 && s.remDuration > s.calculatedRemSeconds + SLEEP.maxTravel + 2) {
+        if (!s.remSafetyNoted) {
+          s.remSafetyNoted = true;
+          s.remSafetyTrips++;
+          releaseStuckCohort();
+        }
+      }
+      if (!timeReached || s.remRemaining > 0) {
         setPhase('rem', clamp(1 - travelShare, 0, 1));
         return;
       }
       s.inDeep = true;
       s.deepStartedAt = s.time;
-      s.deepTarget = s.remDuration;
+      s.actualRemSeconds = s.remDuration;
+      s.deepTarget = s.calculatedRemSeconds;
+      s.deepTargetSeconds = s.calculatedRemSeconds;
       s.deepDuration = 0;
       s.phaseElapsed = 0;
       setPhase('deep', 0);
@@ -2054,6 +2255,20 @@
       out.lastAwakeDuration = s.awakeDuration;
       out.sleepTarget = s.sleepTarget;
       out.remTarget = s.remTarget;
+      out.learningRate = learningRate(s.age);
+      if (out.saturation == null) out.saturation = s.saturation;
+      out.peakSaturation = s.peakSaturation;
+      out.brainSaturation = out.saturation;
+      out.peakBrainSaturation = s.peakSaturation;
+      out.stage1Seconds = s.stage1Seconds;
+      out.stage1Remaining = s.stage1Remaining;
+      out.stage1CohortSize = s.stage1CohortSize;
+      out.calculatedRemSeconds = s.calculatedRemSeconds;
+      out.actualRemSeconds = s.actualRemSeconds;
+      out.remCohortSize = s.remCohortSize;
+      out.remRemaining = s.remRemaining;
+      out.deepTargetSeconds = s.deepTargetSeconds;
+      out.remSafetyTrips = s.remSafetyTrips;
       out.remDuration = s.remDuration;
       out.deepDuration = s.deepDuration;
       out.deepTarget = s.deepTarget;
@@ -2109,6 +2324,7 @@
         edges: edges.length,
         cols: COLS,
         rows: ROWS,
+        rowLengths: network.rowLengths,
         time: s.time,
         age: s.age,
         saturation: s.saturation,
@@ -2231,8 +2447,9 @@
     }
 
     function setPeak(value) {
-      s.peakSaturation = clamp(+value || 0, 0, LIFE.saturationLimit);
-      s.age = LIFE.maxAge * (s.peakSaturation / LIFE.saturationLimit);
+      s.peakSaturation = clamp(+value || 0, 0, 1);
+      s.age = ageFromSaturation(s.peakSaturation);
+      s.learningRate = learningRate(s.age);
       knowledgeDirty = true;
     }
 
@@ -2267,7 +2484,9 @@
       snapshot: snapshot,
       stats: stats,
       myelinateCategory: myelinateOne,
-      sleepHours: sleepHours
+      sleepHours: sleepHours,
+      ageFromSaturation: ageFromSaturation,
+      learningRate: learningRate
     };
   };
 })(typeof window !== 'undefined' ? window : globalThis);

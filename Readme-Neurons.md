@@ -1,10 +1,10 @@
 # Paper Life
 
-**Schwann-cell crystallization.** On a 1440×900 window the brain is a 16×9 lattice: 383 axons, each five thin Schwann cells of equal length along that axon. A taller window picks a taller lattice. A resting cell is a very light blue, almost the background. During sleep, each thought that settles into a permanent home turns exactly one eligible cell purple (`#7b1fa2`, lighter at the center). Cells turn purple radially outward, clockwise around the hub. A lap paints the nearest cell of each spoke before any spoke gains its second cell. When every eligible axon of a neuron is fully crystallized, the domain grows and the next ring becomes eligible. Tossed thoughts and daytime housing color nothing. Saturation is purple cells divided by all cells (1,915 on 16×9), and the peak never falls, so age still moves only while sleep crystallizes. Somas and nuclei keep their normal colors. The underlying axon is only a thin connector. Where an older paragraph below still says thickness, read it as this Schwann-cell coverage.
+**Schwann-cell crystallization.** On a 1440×900 window the brain is 233 neurons in 12 staggered rows (19 or 20 neurons each): 639 axons, each five thin Schwann cells of equal length along that axon. A taller window picks more, shorter rows. A resting cell is a very light blue, almost the background. At birth each of the 13 hubs already holds one permanent thought, and that thought has painted one cell. During sleep, each further thought that settles turns exactly one eligible cell purple (`#7b1fa2`, lighter at the center). Cells turn purple radially outward, clockwise around the hub. A lap paints the nearest cell of each spoke before any spoke gains its second cell. When every eligible axon of a neuron is fully crystallized, the domain grows and the next ring becomes eligible. Tossed thoughts and daytime housing color nothing. Saturation is purple cells divided by all cells (3,195 on the wide lattice), and the peak never falls. Somas and nuclei keep their normal colors. The underlying axon is only a thin connector. Where an older paragraph below still says thickness, read it as this Schwann-cell coverage.
 
 
 
-Paper Life is one brain, drawn as a network, living from birth toward a saturation limit. Outside thoughts enter at the border, shrink as they travel, and sometimes find a temporary home. Internal thoughts answer from category centers. Sleep is automatic: kept homes fly to a permanent cluster, and only then does the brain turn one Schwann cell purple on an axon of that cluster. Age is that knowledge, not the clock.
+Paper Life is one brain, drawn as a network, living from birth toward the 95% brain-saturation plateau. Outside thoughts enter at the border, shrink as they travel, and sometimes find a temporary home. Internal thoughts answer from category centers. Sleep is automatic: kept homes fly to a permanent cluster, and only then does the brain turn one Schwann cell purple on an axon of that cluster. Age is that knowledge, not the clock.
 
 Serve the `Paper-life` folder and open `index.html`. Paper.js 0.12.17 is loaded from the CDN, so a static server is required.
 
@@ -16,13 +16,13 @@ Then open `http://127.0.0.1:8099/`. A query string can seek, freeze, or expose d
 
 ## The brain
 
-`config.network.count` is 144 neurons. At startup the page picks the factor pair of 144 whose cols/rows is closest to the window's width/height. A 1440×900 window gets 16×9. A square window gets 12×12. A 900×1440 window gets 9×16. `?aspect=16x9` (or a width/height ratio) forces the pair for that load only. Resizing the window does not rebuild the lattice or restart the life; the same network is refit. If the window's aspect then disagrees with the lattice, the extra space is a mild letterbox of the background.
+`config.network.count` is 233 neurons. 233 is prime, so this is not a rectangular grid and not 234 or 240. At startup the page chooses a row count near `sqrt(233 / viewportAspect)`, trying nearby integers and keeping the row count whose horizontal and vertical pixel pitch are closest under a uniform fit. Each row has `floor(233 / R)` neurons, and the remainder is handed out one neuron at a time from top to bottom so the longer rows are spread rather than bunched. A shorter row is shifted by half a step, which staggers it against its neighbors. A 1440×900 window gets 12 rows, lengths 19, 19, 20, 19, 20, 19, 19, 20, 19, 20, 19, 20, in a 20×12 world. A square window gets 15 rows of 15 or 16. A 900×1440 window gets 20 rows of 11 or 12. `?aspect=16x9` (or a width/height ratio) chooses that shape for the load only. Resizing the window does not rebuild the lattice or restart the life; the same network is refit. If the window's aspect then disagrees with the lattice, the extra space is a mild letterbox of the background.
 
-World space is that rectangle: one unit is one lattice step, so 16×9 is 16 units wide and 9 tall. The renderer maps it with one scale, centered. Horizontal and vertical steps are the same pixel length. The background still covers the whole window.
+World space is the bounding rectangle: one unit is one lattice step, so the wide lattice is 20 units wide and 12 tall. The renderer maps it with one scale, centered. Horizontal and vertical steps are the same pixel length. The background still covers the whole window.
 
-Each neuron is jittered by `mulberry32(23)` by about ±22–30% of that step, independently on x and y, and kept at least 0.55 units from every other neuron. A sample that would land closer is redrawn; the unjittered center is the fallback. Nothing sits closer than 0.18 units to the world edge. On the 16×9 lattice the axons then run from 0.60 to 1.93 units (mean 1.19, coefficient of variation 0.24). Each neuron grows three dendrites and has a large nucleus, about 0.64 of the soma radius. Neighbors are joined by cubic Bézier axons: horizontal lanes, alternating diagonals, and vertical links, walkable in either direction. The bend of each axon is a hash of its endpoints. A 16×9 lattice has 383 axons and 1,915 Schwann cells; 12×12 has 386 axons.
+Each neuron is jittered by `mulberry32(23)` by about ±22–30% of that step, independently on x and y, and kept at least 0.55 units from every other neuron. A sample that would land closer is redrawn; the unjittered center is the fallback. Nothing sits closer than 0.18 units to the world edge. On the wide lattice the axons then run from 0.58 to 1.89 units (mean 1.13, coefficient of variation 0.20). The square lattice is 0.58 to 1.84 (mean 1.13, CV 0.20). The tall lattice is 0.59 to 1.91 (mean 1.15, CV 0.21). Each neuron grows three dendrites and has a large nucleus, about 0.64 of the soma radius. Neighbors in a row are joined by a horizontal axon. Between rows, each neuron links to its nearest neighbor by nominal x, and to the second when that neighbor is at most one step away, which is the diagonal. The graph is one connected piece. Outside thoughts enter from the left or right end of any row, or from any neuron in the first or last row. The bend of each axon is a hash of its endpoints. The wide lattice has 639 axons and 3,195 Schwann cells; the square lattice has 640 axons; the tall lattice has 643 axons and 3,215 cells.
 
-`config.categories.count` neurons are category centers. The count is 13. They are chosen by continuing the same seeded shuffle, at least two cells in from the border, and at least three world units apart. If that separation cannot place every center, it relaxes by half a unit until it can. On 16×9 and 9×16 this seed settles at 1.5; on 12×12 it holds at 2. The centers are not arranged in rows.
+`config.categories.count` neurons are category centers. The count is 13. They are chosen by continuing the same seeded shuffle, at least two cells in from the border, and at least three world units apart. If that separation cannot place every center, it relaxes by half a unit until it can. On the wide, square, and tall lattices this seed holds at 2.5. The centers are not arranged in rows.
 
 ## Outside thoughts
 
@@ -94,7 +94,7 @@ A blue thought and a traveler crystallize only while they are still close enough
 
 When no new thought is being accepted and nothing is temporary or wandering, no new internal thoughts are created. Whatever is already flying finishes, and the mind goes quiet.
 
-The counter pool holds 610 slots. The first night on the 16×9 lattice drops no bursts. When more than 72 are on screen at once, their shared opacity is lowered. None are skipped.
+The counter pool holds 610 slots. The first night on the wide lattice drops no bursts. When more than 72 are on screen at once, their shared opacity is lowered. None are skipped.
 
 ## Lust for learning
 
@@ -104,29 +104,42 @@ The only control is a slider from Meditation (0) to Eager (100).
 lustNatural = 100 × (1 − peakSaturation / 0.8)
 ```
 
-clamped to 0–100. An empty brain rests at 100. As peak saturation approaches 80%, lust rests near 0. Natural lust moves only when peak saturation moves, and peak saturation moves only when sleep consolidates, so an awake bout holds lust still.
+clamped to 0–100. An empty brain rests at 100. As peak brain saturation approaches 80%, lust rests near 0. Natural lust moves only when peak brain saturation moves, and peak brain saturation moves only when sleep consolidates, so an awake bout holds lust still.
 
 Dragging forces a value and holds it. On release it eases back toward natural with time constant 3.5 simulated seconds (`1 − e^(−dt/3.5)`). It counts as forced until it is within 0.5 of natural. `setLust` is the same nudge from code.
 
-Housing chance equals lust/100.
+Housing chance equals `(lust / 100) × learningRate(age)`. At birth the rate is 1, so this is still lust/100.
 
 - At 100, a meeting can crystallize, and every thought that passes the border fires the seven-center burst.
 - At 0, meditation: thoughts still enter large, flow, shrink, and fade. No temporary home, no wave, no acceptance burst. A home that already exists keeps its 1–3 timer until it settles or is tossed.
-- In between, the share of travelers accepted for housing, and therefore the share that fire the burst, equals lust/100.
+- In between, the share of travelers accepted for housing, and therefore the share that fire the burst, equals `(lust / 100) × learningRate(age)`.
 
 ## Age and knowledge
 
-Saturation is the fraction of axon length covered by knowledge. Age is `100 × peakSaturation / 0.8`. Peak saturation never falls, so a night that concentrates wiring cannot make the brain younger.
+Brain saturation is purple Schwann cells divided by every Schwann cell. Peak brain saturation never falls, so a night that concentrates wiring cannot make the brain younger. Age is the inverse of the coverage column below, piecewise linear between the anchors. At 95% coverage and above, age is 90 and stays there. The age-80 row has the same 95% coverage, so it does not add a second point; age 80 is reached on the segment from 93% (age 70) to 95% (age 90).
 
-Thickness deposited in sleep is scaled by growth. Age 0–100 is mapped onto 0–90 degrees:
+| Age | New knowledge | Brain saturation |
+| --- | --- | --- |
+| 0 | 100% | 0% |
+| 10 | 95% | 25% |
+| 20 | 70% | 50% |
+| 30 | 50% | 68% |
+| 40 | 40% | 78% |
+| 50 | 35% | 85% |
+| 60 | 30% | 90% |
+| 70 | 20% | 93% |
+| 80 | 12% | 95% |
+| 90 | 5% | 95% |
+
+`learningRate(age)` is the new-knowledge column divided by 100, linear in age between those anchors, and clamped at 0.05 from age 90 on. It multiplies housing chance, and a kept permanent thought colors one Schwann cell only when a hash of that thought falls below the rate. At birth the roll always succeeds. At age 90 it succeeds 5% of the time. The 13 seed thoughts are outside that roll: each colors one cell at reset. On the wide lattice that is 13/3,195 brain saturation, about 0.407%, which the inverse maps to about 0.163 years. The seeds stay. Keep-or-toss stays the life-stage keep chance and is not this rate. Spawn acceptance stays the life-stage acceptance. Border filters and natural lust still treat 80% coverage as maturity (`peakSaturation / 0.8`); that is not an end of life.
+
+Thickness deposited in sleep is still scaled by growth, separate from the cell roll:
 
 ```
 growth = max(0.2, cos(age × 0.9°) − 0.0001)
 ```
 
-Youth is near 1. The floor of 0.2 keeps late life from stalling. Life ends when peak saturation reaches 80% (within 0.001). The picture holds for 3 seconds, the veil fades in, and a new life begins.
-
-Two filters ride the same progress, `peakSaturation / 0.8`. Filter strength is a smoothstep from 4% to 96% of that progress, and it scales how readily a familiar danger or attraction is refused at the border (chance from 0.15 to 0.55). Risk affinity is the complement and shortens lifetimes as it falls.
+Two filters ride `peakSaturation / 0.8`. Filter strength is a smoothstep from 4% to 96% of that progress, and it scales how readily a familiar danger or attraction is refused at the border (chance from 0.15 to 0.55). Risk affinity is the complement and shortens lifetimes as it falls.
 
 ## Life stages
 
@@ -178,7 +191,8 @@ There is no awake/sleep control. Need is U divided by the threshold. Sleep begin
 | --- | --- | --- | --- |
 | `awake` | `#f6fbff` | `#d8eaf7` | Light blue. Freshly awake. |
 | `sleep-needed` | toward `#fff1f1` | toward `#f6d5d5` | Light red, in proportion to need. The blend starts at need 0.2. |
-| `rem` | `#f3fbf4` | `#d9f0dc` | Very light green. First half of the night. |
+| `stage1` | `#f4f0fb` | `#e4dcf3` | Pale lavender. From the moment sleep begins until every thought that was still traveling has faded or found a temporary home. |
+| `rem` | `#f3fbf4` | `#d9f0dc` | Very light green. At least the calculated half, longer while the REM cohort is still open. |
 | `deep` | `#4f535a` | `#24272d` | Dark gray. Second half. |
 | `waking` | back toward light blue | | 1.8 seconds, then awake. |
 
@@ -186,7 +200,9 @@ There is no awake/sleep control. Need is U divided by the threshold. Sleep begin
 
 ![Deep sleep, dark gray](screenshots/deep-dark.png)
 
-Total sleep is `sleepHours(U, C) × 2` seconds. REM is the first half. Deep sleep lasts exactly as long as the REM just finished, within one frame (1/60 second).
+Sleep onset opens Stage 1, not REM. Stage 1 has no minimum length. It ends when every external thought that was still active at onset has faded, been rejected, or found a temporary home. Those identities are remembered, so a recycled traveler slot cannot keep the phase open. If none are active, Stage 1 lasts one simulation step and then yields. No new outside thought is born from Stage 1 onward. Travelers may still shrink, fade, or find a temporary home and fire the acceptance burst they were already due. Tossing, the flight to a permanent cluster, and purple crystallization wait until REM.
+
+The night's length is still `sleepHours(U, C) × 2` seconds, using the unsettled and crystallized counts at the original onset. Calculated REM is half of that, and deep sleep is always that same calculated half, within one frame (1/60 second). When Stage 1 ends, the REM cohort is snapshotted: temporary and wandering homes already waiting, plus any thought that found a home during Stage 1. Faded travelers are not in it. Actual REM is at least the calculated half, and longer while that cohort is still temporary or wandering. The background eases from the light red of needing sleep into pale lavender, then into very light green REM. Deep stays dark gray. A safety counter notes a Stage 1 thought still open after 14 seconds, or a REM cohort still open well after the calculated half plus the travel bound. Neither counter discards a thought to meet the clock.
 
 At the start of REM every temporary thought, and every thought already in transit, is kept or tossed once, by a hash of its identity and the night, using the age's keep chance. Permanent thoughts are never tossed later.
 
@@ -199,7 +215,7 @@ If work is unfinished when deep sleep ends, the remaining kept thoughts are plac
 
 ## Knowledge growth
 
-Purple Schwann cells are sleep-only. Daytime crossings do not color a cell or move saturation. A tossed thought colors none.
+Purple Schwann cells are sleep-only, apart from the 13 seed cells painted at birth. Daytime crossings do not color a cell or move brain saturation. A tossed thought colors none.
 
 Each axon is exactly five Schwann cells, spaced by arc length so they look the same length, with a gap between them. Uncrystallized cells are a very light blue, a few shades darker than the awake background edge (`#d8eaf7`), so they stay faintly visible on light blue, light red, and very light green. In deep sleep they shift to a dim gray-blue on the dark gray. The connector line underneath is lighter still. A crystallized cell is `#7b1fa2` with a lighter center (`#a75bc9`) spread across the whole cell, so one cell never reads as two. Cells are thin, about 0.045 of a grid cell wide, and their round caps are inset so the gaps stay open. The soma and nucleus stay the normal palette colors. There is no thick axon overlay.
 
@@ -209,7 +225,7 @@ Ring 1 is the spokes leaving the hub, sorted by the angle from the hub to the ne
 
 The neurons that join form the next ring, ordered clockwise around the hub from 12 o'clock. Each contributes its outward axons, one axon per neuron per pass, so the sweep goes around the ring rather than finishing one neuron first. An axon that leads back toward the hub, or that ends on another category's neuron, is skipped. Further rings follow the same way. Domains do not share a neuron.
 
-Saturation is `purpleSchwannCells / totalSchwannCells`. With five equal compartments that count is the length-weighted coverage. Peak saturation never falls. Age is `100 × peakSaturation / 0.8`.
+Brain saturation is `purpleSchwannCells / totalSchwannCells`. With five equal compartments that count is the length-weighted coverage. Peak brain saturation never falls. Age is the piecewise-linear inverse of the coverage table, and it plateaus at 90 once coverage reaches 95%. `brainSaturation` and `peakBrainSaturation` are the preferred stats names. `saturation` and `peakSaturation` remain the same numbers.
 
 There are `config.categories.count` categories, currently 13, split across the three families as evenly as possible. Earlier families take the remainder, so danger has 5, attraction 4, and everyday 4. Each family cycles this weight pattern, and stops early when the family is shorter than the pattern:
 
@@ -221,11 +237,11 @@ That yields 13 weights, not a fixed list of 21. Categories 0–4 are danger, 5�
 
 Each domain starts as a small ring around its anchor, `0.72 + 0.5 × (weight / 1.8)`, and never wider than 0.42 times the gap to the nearest other anchor, so the rings do not cover a neighbor at birth. The ring grows when a neuron's eligible axons are all five-purple. Neurons outside every domain are not painted.
 
-![16×9 lattice on a 1440×900 window, awake after the first night](screenshots/144-wide.png)
+![233 neurons, staggered rows, on a 1440×900 window](screenshots/233-wide.png)
 
-![9×16 lattice on a 900×1440 window](screenshots/144-tall.png)
+![233 neurons on a 900×1440 window](screenshots/233-tall.png)
 
-![Deep sleep on the wide lattice: dim axons, purple cells clockwise around the hubs](screenshots/144-deep.png)
+![Deep sleep on the wide lattice: dim axons, purple cells clockwise around the hubs](screenshots/233-deep.png)
 
 Classification prefers the matching family, then the category furthest below its weighted share. During deep sleep, a thought moves from the category furthest over its target to the one furthest under it, about every 0.6 seconds, while the surplus and deficit are at least one thought. The clusters are not meant to end up the same size.
 
@@ -250,7 +266,7 @@ Classification prefers the matching family, then the category furthest below its
 
 The control box starts hidden. **Show controls** sits at the top left; **Hide** is inside the panel. The choice is stored in `paperLife.hudHidden` (`1` hidden, `0` shown). A missing key means hidden. The life keeps running while the box is closed, and the panel refreshes when it is opened. The transition is about 200 milliseconds.
 
-Inside the box: knowledge saturation, age and stage, sleep need, cluster counts, the wave note, a color legend, and the lust slider.
+Inside the box: brain saturation, age and stage, sleep need, cluster counts, the wave note, a color legend, and the lust slider.
 
 The panel and the show button are translucent white with dark blue text, so they stay readable on light blue, light green, and dark gray.
 
@@ -283,7 +299,7 @@ The panel and the show button are translucent white with dark blue text, so they
 
 A backgrounded tab cannot fast-forward the life. Each frame advances at most 0.05 simulated seconds.
 
-Stats worth knowing: `fastRejectedThoughts`, `insignificantFades`, `temporarilyHoused`, `rewardWaves`, `stressWaves`, `internalBursts`, `acceptanceBursts`, `homeBursts`, `internalParticles`, `droppedInternalBursts`, `peakActiveCounters`, `latestBurst` (its trigger, source categories, and size classes), `lust`, `lustNatural`, `housingChance`, `ageStage`, `acceptance`, `keepChance`, `awakeDuration`, `sleepTarget`, `remDuration`, `deepDuration`, `keptThisSleep`, `tossedThisSleep`, `crystallized`, `unsettled`, `sleepThreshold`, `sleepHours`, `sleepSeconds`, `onsetUnsettled`, `onsetCrystallized`.
+Stats worth knowing: `fastRejectedThoughts`, `insignificantFades`, `temporarilyHoused`, `rewardWaves`, `stressWaves`, `internalBursts`, `acceptanceBursts`, `homeBursts`, `internalParticles`, `droppedInternalBursts`, `peakActiveCounters`, `latestBurst` (its trigger, source categories, and size classes), `lust`, `lustNatural`, `housingChance`, `ageStage`, `acceptance`, `keepChance`, `awakeDuration`, `sleepTarget`, `remDuration`, `deepDuration`, `keptThisSleep`, `tossedThisSleep`, `crystallized`, `unsettled`, `sleepThreshold`, `sleepHours`, `sleepSeconds`, `onsetUnsettled`, `onsetCrystallized`, `calculatedRemSeconds`, `actualRemSeconds`, `remCohortSize`, `remRemaining`, `deepTargetSeconds`, `brainSaturation`, `peakBrainSaturation`, `learningRate`, `age`. `saturation` and `peakSaturation` are the same coverage values under the older names.
 
 ## Architecture
 
@@ -303,19 +319,19 @@ Stats worth knowing: `fastRejectedThoughts`, `insignificantFades`, `temporarilyH
 
 ## Performance
 
-Pools are fixed: 144 thoughts, 610 internal thoughts, 377 crystals, 16 waves. Paper paths are created once and hidden with `visible = false`. Schwann cells are created once too: exactly five paths per axon, 1,915 for the 383 axons of a 16×9 lattice. A frame only recolors a cell when it turns purple or the sleep contrast changes. Saturation is recomputed only after a cell changes, which is during sleep. Settled counts are incremental. The internal-thought free list is a preallocated stack, and a burst reuses one center-index array, so a burst does not allocate. The frame catch-up is capped at 0.05 seconds.
+Pools are fixed: 144 thoughts, 610 internal thoughts, 377 crystals, 16 waves. The neuron count is separate from those pools. Paper paths are created once and hidden with `visible = false`. Schwann cells are created once too: exactly five paths per axon, 3,195 for the 639 axons of the wide lattice. A frame only recolors a cell when it turns purple or the sleep contrast changes. Brain saturation is recomputed only after a cell changes. Settled counts are incremental. The internal-thought free list is a preallocated stack, and a burst reuses one center-index array, so a burst does not allocate. The frame catch-up is capped at 0.05 seconds.
 
 There is no spatial hash. A meeting test walks active internal thoughts against active travelers. That is cheap while the pools stay at this size.
 
-Node, `advance(1/60)` on the 16×9 lattice: t=0 has 13 crystallized seeds and 13 purple cells, one per hub. Sleep-needed starts at 2.0 s; the first sleep starts at 3.68 s with U = 5 and C = 13, so 18 hours: REM 18.00 s, deep 18.00 s, waking at 39.68 s. After that night: 23 purple cells (13 seeds plus 10 settles), 2 tossed.
+Node, `advance(1/60)` on the wide lattice: t=0 has 13 crystallized seeds, 13 purple cells, brain saturation 0.407%, and age 0.163. Stage 1 starts at 2.97 s with 21 travelers still out and lasts 7.22 s. REM then runs the calculated 18.00 s, deep the same 18.00 s. That young night colors 7 of 7 kept thoughts. Forcing age 90 at Stage 1, rate 0.05, colors 0 of 7 kept thoughts on the same night.
 
-Headless Chrome, `?still=1&hud=0`: `t=72` at 1440×900 is awake on 16×9, `t=72` at 900×1440 is awake on 9×16, and `t=55` at 1440×900 is deep. These three screenshots predate the seeds and the new sleep timing, so the same `t` now lands in a different phase. A frame recolors a cell only when it turns purple or the sleep contrast changes. A `?bench=1` frame-time dump was not returned by headless Chrome in this pass, so average and p95 frame time are not reported. A frame recolors a cell only when it turns purple or the sleep contrast changes.
+Headless Chrome, `?still=1&hud=0`: `t=40.8` at 1440×900 is awake, `t=42` at 900×1440 is awake, and `t=30` at 1440×900 is deep. A `?bench=1` frame-time dump was not returned by headless Chrome in this pass, so average and p95 frame time are not reported.
 
 ## Tuning
 
 | Constant | Value | What it controls |
 | --- | --- | --- |
-| `network.count` | 144 | Neurons. The lattice is the factor pair closest to the window aspect. |
+| `network.count` | 233 | Neurons. Staggered rows chosen from the window aspect, not a rectangle. |
 | `pools.thoughts`, `counters`, `crystals` | 144, 610, 377 | Fixed pools. |
 | `spawnRate` | 11 | Travelers per second before acceptance. |
 | `entryScale`, `fadeScale`, `shrinkPower` | 3.4, 0.15, 1.35 | Traveler size from entry to fade. |
@@ -326,7 +342,7 @@ Headless Chrome, `?still=1&hud=0`: `t=72` at 1440×900 is awake on 16×9, `t=72`
 | `internal.ttlMin`, `ttlMax`, `sleepTtl` | 2.6, 4.2, 1.35 | Internal lifetime; sleep multiplies by 1.35. |
 | `internal.shrinkPower` | 1.2 | How internal size falls to zero. |
 | `lust.tau`, `forcedBand` | 3.5, 0.5 | Easing back to natural, and when a nudge still counts as forced. |
-| `life.saturationLimit`, `growthFloor`, `hold` | 0.8, 0.2, 3 | End of life, late-life growth floor, seconds the finished picture is held. |
+| `life.maxAge`, `plateau` | 90, 0.95 | Age clamps at 90 once purple coverage reaches 95%. |
 | `sleep.secondsPerHour` | 2 | Simulated seconds per hour of `sleepHours`. Onset is `max(5, round(5C/13))` unsettled thoughts. |
 | `sleep.travelMultiplier` | 3 | Sleep flight versus daytime speed. |
 | `sleep.deposit`, `consolidationBonus` | 0.72, 0.03 | Latent weight a home still carries. Settling paints one Schwann cell, not this amount. |
@@ -337,7 +353,7 @@ Headless Chrome, `?still=1&hud=0`: `t=72` at 1440×900 is awake on 16×9, `t=72`
 
 ## Known limitations
 
-A full life to 80% saturation was not timed. After the first night on 16×9 the brain has 74 purple Schwann cells out of 1,915. A night paints cells one housing at a time; it does not color the whole network.
+A full life to the 95% brain-saturation plateau was not timed. Coverage no longer ends the run at 80%. The first young night colors every kept thought; at age 90 the same kind of night colors almost none. A night does not color the whole network.
 
 Reward and stress waves are visual metaphors for a pulse of reward or stress. They are not a hormone assay, and they are not two named chemicals.
 
