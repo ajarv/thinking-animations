@@ -19,7 +19,34 @@
     return dx * dx + dy * dy + dz * dz;
   }
 
-  // Fibonacci points on a sphere, stretched into an ellipsoid and nudged by the seed.
+  function warpBrain(x, y, z, brain) {
+    const top = Math.max(0, y);
+    const medial = Math.exp(-Math.pow(x / brain.grooveWidth, 2));
+    const side = x < 0 ? -1 : 1;
+
+    // Two upper lobes with a visible longitudinal fissure.
+    x += side * brain.hemisphereSplit * top * medial;
+    y -= brain.grooveDepth * Math.pow(top, 1.5) * medial;
+
+    const front = Math.max(0, z);
+    const rear = Math.max(0, -z);
+    const temporal = Math.exp(-Math.pow((y + 0.32) / 0.3, 2)) *
+      (0.55 + 0.45 * (1 - Math.min(1, Math.abs(z))));
+
+    // Human-brain silhouette: broad frontal and temporal regions, narrower rear.
+    x *= 1 + brain.frontalBulge * front -
+      brain.posteriorTaper * rear + brain.temporalBulge * temporal;
+    z *= 1 + brain.frontalBulge * 0.45 * front -
+      brain.posteriorTaper * 0.35 * rear;
+
+    // Compress the bottom into a flatter base without a hard edge.
+    if (y < brain.underside) {
+      y = brain.underside + (y - brain.underside) * brain.undersideCompression;
+    }
+    return { x: x, y: y, z: z };
+  }
+
+  // Seeded Fibonacci points warped into a stylized brain surface.
   B3.createSkeleton = function (config) {
     const count = config.network.count;
     const shape = config.shape;
@@ -33,11 +60,17 @@
       const y = count === 1 ? 0 : 1 - (i / last) * 2;
       const ring = Math.sqrt(Math.max(0, 1 - y * y));
       const theta = golden * i;
+      const point = warpBrain(
+        Math.cos(theta) * ring + (rng() - 0.5) * jitter,
+        y + (rng() - 0.5) * jitter,
+        Math.sin(theta) * ring + (rng() - 0.5) * jitter,
+        shape.brain
+      );
       neurons.push({
         id: i,
-        x: (Math.cos(theta) * ring + (rng() - 0.5) * jitter) * shape.rx,
-        y: (y + (rng() - 0.5) * jitter) * shape.ry,
-        z: (Math.sin(theta) * ring + (rng() - 0.5) * jitter) * shape.rz
+        x: point.x * shape.rx,
+        y: point.y * shape.ry,
+        z: point.z * shape.rz
       });
     }
 

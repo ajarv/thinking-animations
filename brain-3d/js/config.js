@@ -11,8 +11,23 @@
       // Jitter on the unit sphere, before the ellipsoid scale.
       jitter: 0.08
     },
-    // Brain-shaped volume: wider than it is tall.
-    shape: { rx: 1.35, ry: 0.92, rz: 1.05 },
+    shape: {
+      rx: 1.35,
+      ry: 0.92,
+      rz: 1.05,
+      brain: {
+        // Separate the upper hemispheres and cut a shallow sagittal groove.
+        hemisphereSplit: 0.055,
+        grooveDepth: 0.11,
+        grooveWidth: 0.2,
+        // Round the front, taper the rear, and form the lower temporal lobes.
+        frontalBulge: 0.11,
+        posteriorTaper: 0.13,
+        temporalBulge: 0.13,
+        underside: -0.58,
+        undersideCompression: 0.32
+      }
+    },
     spin: { degreesPerSecond: 6 },
     camera: {
       // Distance from the eye to the origin, in skeleton units.
