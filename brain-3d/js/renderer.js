@@ -6,7 +6,7 @@
     return root.performance ? root.performance.now() : Date.now();
   }
 
-  B3.createRenderer = function (paper, skeleton, config) {
+  B3.createRenderer = function (paper, skeleton, config, simulation) {
     const Point = paper.Point;
     const Path = paper.Path;
     const neurons = skeleton.neurons;
@@ -15,12 +15,16 @@
     const camera = config.camera;
     const somaCfg = config.soma;
     const schwannCfg = config.schwann;
+    const thoughtCfg = config.thoughts;
     const yawRate = config.spin.degreesPerSecond * Math.PI / 180;
     const BASE = 10;
 
     const background = new Path.Rectangle(paper.view.bounds);
     const schwannLayer = new paper.Group();
-    const somaLayer = new paper.Group();
+    const objectLayer = new paper.Group();
+
+    const scratch3 = { x: 0, y: 0, z: 0 };
+    const scratch2 = { x: 0, y: 0, z: 0, s: 1 };
 
     // Five pooled, rounded paths make the Schwann cells along each axon.
     const schwannCells = edges.map(function () {
@@ -39,13 +43,25 @@
     });
 
     // Soma and nucleus share a group so depth sort moves one item per neuron.
-    const cells = neurons.map(function () {
+    // A domain center also carries a camera-facing ring, the 2D anchor mark.
+    const cells = neurons.map(function (neuron) {
+      const isCenter = neuron.category >= 0;
+      const children = [];
+      if (isCenter) {
+        children.push(new Path.Circle({
+          center: [0, 0],
+          radius: BASE * 2.15,
+          strokeColor: colors.anchorRing,
+          strokeWidth: 2,
+          strokeScaling: false
+        }));
+      }
       const soma = new Path.Circle({
         center: [0, 0],
         radius: BASE,
         fillColor: colors.soma,
-        strokeColor: colors.somaEdge,
-        strokeWidth: 1.2,
+        strokeColor: isCenter ? colors.anchorRing : colors.somaEdge,
+        strokeWidth: isCenter ? 2 : 1.2,
         strokeScaling: false
       });
       const nucleus = new Path.Circle({
@@ -53,10 +69,45 @@
         radius: BASE * somaCfg.nucleus,
         fillColor: colors.nucleus
       });
-      const group = new paper.Group({ children: [soma, nucleus], applyMatrix: false });
+      children.push(soma, nucleus);
+      const group = new paper.Group({ children: children, applyMatrix: false });
       group.pivot = new Point(0, 0);
-      somaLayer.addChild(group);
+      objectLayer.addChild(group);
       return group;
+    });
+
+    function createBead(fill, core, haloScale) {
+      const halo = new Path.Circle({
+        center: [0, 0],
+        radius: BASE * haloScale,
+        fillColor: fill,
+        opacity: 0.14
+      });
+      const bead = new Path.Circle({
+        center: [0, 0],
+        radius: BASE,
+        fillColor: fill,
+        strokeColor: core,
+        strokeWidth: 1.5,
+        strokeScaling: false
+      });
+      const group = new paper.Group({ children: [halo, bead], applyMatrix: false });
+      group.pivot = new Point(0, 0);
+      group.visible = false;
+      objectLayer.addChild(group);
+      return {
+        group: group,
+        projected: { x: 0, y: 0, z: 0, s: 1 },
+        record: null
+      };
+    }
+
+    const externalView = createBead(colors.external, colors.externalCore, 1.75);
+    const internalViews = simulation.internals.map(function () {
+      return createBead(colors.internal, colors.internalCore, 1.55);
+    });
+    const homeViews = simulation.homes.map(function () {
+      return createBead(colors.temporary, colors.temporaryCore, 1.45);
     });
 
     const readout = new paper.PointText({
@@ -68,13 +119,25 @@
     });
 
     const projected = neurons.map(function () { return { x: 0, y: 0, z: 0, s: 1 }; });
-    const order = neurons.map(function (_, i) { return i; });
-    const byDepth = function (a, b) { return projected[b].z - projected[a].z; };
+    const depthOrder = cells.map(function (view, index) {
+      return { view: view, depth: 0, active: true, neuron: index };
+    });
+    function addBeadRecord(view) {
+      const record = { view: view.group, depth: Infinity, active: false, neuron: -1 };
+      view.record = record;
+      depthOrder.push(record);
+    }
+    addBeadRecord(externalView);
+    internalViews.forEach(addBeadRecord);
+    homeViews.forEach(addBeadRecord);
+    const byDepth = function (a, b) {
+      if (a.active !== b.active) return a.active ? 1 : -1;
+      return b.depth - a.depth;
+    };
     let yaw = 0;
     let scale = 1;
     let cx = 0;
     let cy = 0;
-    const drawn = order.slice();
     let frameMs = 0;
     let frames = 0;
     let sampled = 0;
@@ -82,6 +145,11 @@
       neurons: neurons.length,
       axons: edges.length,
       schwannCells: edges.length * schwannCfg.cellsPerAxon,
+      domains: skeleton.anchors.length,
+      activeThoughts: 0,
+      temporaryHomes: 0,
+      cohorts: 0,
+      housed: 0,
       avgMs: 0,
       fps: 0
     };
@@ -102,6 +170,23 @@
       scale = Math.min(bounds.width, bounds.height) * camera.fill * camera.distance;
     }
 
+    function projectPoint(x, y, z, into) {
+      const c = Math.cos(yaw);
+      const s = Math.sin(yaw);
+      const xr = x * c + z * s;
+      const zr = z * c - x * s;
+      const k = 1 / (camera.distance + zr);
+      into.x = cx + xr * scale * k;
+      into.y = cy - y * scale * k;
+      into.z = zr;
+      into.s = camera.distance * k;
+    }
+
+    function axonPoint(edgeIndex, t, into) {
+      skeleton.pointOnEdge(edgeIndex, t, scratch3);
+      projectPoint(scratch3.x, scratch3.y, scratch3.z, into);
+    }
+
     function project() {
       const c = Math.cos(yaw);
       const s = Math.sin(yaw);
@@ -118,6 +203,79 @@
       }
     }
 
+    function hideBead(view) {
+      view.group.visible = false;
+      view.record.active = false;
+      view.record.depth = Infinity;
+    }
+
+    function placeBead(view, item, radius, fadeAt) {
+      if (!item.active) {
+        hideBead(view);
+        return false;
+      }
+      const p = view.projected;
+      projectPoint(item.position.x, item.position.y, item.position.z, p);
+      const pixelRadius = Math.max(0.25, radius * item.scale *
+        (scale / camera.distance) * p.s);
+      const factor = pixelRadius / BASE;
+      const matrix = view.group.matrix;
+      matrix.a = factor;
+      matrix.b = 0;
+      matrix.c = 0;
+      matrix.d = factor;
+      matrix.tx = p.x;
+      matrix.ty = p.y;
+      view.group.matrix = matrix;
+      view.group.opacity = fadeAt > 0 ? Math.min(1, item.scale / fadeAt) : 1;
+      view.group.visible = true;
+      view.record.active = true;
+      view.record.depth = p.z;
+      return true;
+    }
+
+    function drawThoughts() {
+      let active = 0;
+      if (placeBead(
+        externalView,
+        simulation.external,
+        thoughtCfg.external.radius,
+        0.45
+      )) active++;
+      for (let i = 0; i < internalViews.length; i++) {
+        if (placeBead(
+          internalViews[i],
+          simulation.internals[i],
+          thoughtCfg.internal.radius,
+          0.25
+        )) active++;
+      }
+      let homes = 0;
+      for (let i = 0; i < homeViews.length; i++) {
+        if (placeBead(
+          homeViews[i],
+          simulation.homes[i],
+          thoughtCfg.external.radius,
+          0
+        )) homes++;
+      }
+      stats.activeThoughts = active;
+      stats.temporaryHomes = homes;
+      stats.cohorts = simulation.stats.cohorts;
+      stats.housed = simulation.stats.housed;
+    }
+
+    function statusText(includePerformance) {
+      let text = stats.neurons + ' neurons · ' + stats.axons + ' axons · ' +
+        stats.schwannCells + ' Schwann cells · ' + stats.domains + ' domains · ' +
+        stats.activeThoughts + ' moving · ' + stats.temporaryHomes + ' temporary';
+      if (includePerformance) {
+        text += ' · ' + stats.avgMs.toFixed(2) + ' ms update · ' +
+          stats.fps.toFixed(0) + ' fps';
+      }
+      return text;
+    }
+
     function draw(dt) {
       const t0 = now();
       yaw += yawRate * dt;
@@ -126,19 +284,17 @@
       for (let i = 0; i < edges.length; i++) {
         const pa = projected[edges[i].a];
         const pb = projected[edges[i].b];
-        const dx = pb.x - pa.x;
-        const dy = pb.y - pa.y;
         const opacity = Math.min(1, 0.4 + 0.55 * (pa.s + pb.s) * 0.5);
         const gap = schwannCfg.gapRatio * 0.5;
         const cells = schwannCells[i];
         for (let j = 0; j < cells.length; j++) {
-          const start = (j + gap) / cells.length;
-          const finish = (j + 1 - gap) / cells.length;
           const segs = cells[j].segments;
-          segs[0].point.x = pa.x + dx * start;
-          segs[0].point.y = pa.y + dy * start;
-          segs[1].point.x = pa.x + dx * finish;
-          segs[1].point.y = pa.y + dy * finish;
+          axonPoint(i, (j + gap) / cells.length, scratch2);
+          segs[0].point.x = scratch2.x;
+          segs[0].point.y = scratch2.y;
+          axonPoint(i, (j + 1 - gap) / cells.length, scratch2);
+          segs[1].point.x = scratch2.x;
+          segs[1].point.y = scratch2.y;
           cells[j].opacity = opacity;
         }
       }
@@ -149,30 +305,29 @@
         const m = cells[i].matrix;
         m.a = r; m.b = 0; m.c = 0; m.d = r; m.tx = p.x; m.ty = p.y;
         cells[i].matrix = m;
-      }
-
-      order.sort(byDepth);
-      let changed = false;
-      for (let n = 0; n < order.length; n++) {
-        if (drawn[n] !== order[n]) { changed = true; break; }
-      }
-      if (changed) {
-        for (let n = 0; n < order.length; n++) {
-          drawn[n] = order[n];
-          somaLayer.addChild(cells[order[n]]);
+        if (neurons[i].category >= 0) {
+          cells[i].firstChild.opacity = Math.min(1, 0.55 + 0.45 * p.s);
         }
+        depthOrder[i].depth = p.z;
       }
 
-      if (dt > 0.1) return;
+      drawThoughts();
+      depthOrder.sort(byDepth);
+      for (let n = 0; n < depthOrder.length; n++) {
+        objectLayer.addChild(depthOrder[n].view);
+      }
+
+      if (dt > 0.1) {
+        readout.content = statusText(false);
+        return;
+      }
       frameMs += now() - t0;
       frames++;
       sampled += dt;
       if (sampled >= 0.5) {
         stats.avgMs = frameMs / frames;
         stats.fps = frames / sampled;
-        readout.content = stats.neurons + ' neurons · ' + stats.axons + ' axons · ' +
-          stats.schwannCells + ' Schwann cells · ' +
-          stats.avgMs.toFixed(2) + ' ms update · ' + stats.fps.toFixed(0) + ' fps';
+        readout.content = statusText(true);
         frameMs = 0;
         frames = 0;
         sampled = 0;
@@ -180,8 +335,7 @@
     }
 
     layout();
-    readout.content = stats.neurons + ' neurons · ' + stats.axons + ' axons · ' +
-      stats.schwannCells + ' Schwann cells';
+    readout.content = statusText(false);
     return { layout: layout, draw: draw, stats: stats };
   };
 })(typeof window !== 'undefined' ? window : globalThis);

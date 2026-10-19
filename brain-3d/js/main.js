@@ -6,16 +6,29 @@
 
   paper.setup(document.getElementById('stage'));
   const skeleton = B3.createSkeleton(B3.config);
-  const renderer = B3.createRenderer(paper, skeleton, B3.config);
-  root.brain3d = renderer;
+  const simulation = B3.createSimulation(skeleton, B3.config);
+  const renderer = B3.createRenderer(paper, skeleton, B3.config, simulation);
+  const fixedStep = B3.config.thoughts.fixedStep;
+  root.brain3d = {
+    skeleton: skeleton,
+    simulation: simulation,
+    renderer: renderer
+  };
 
   paper.view.onResize = function () {
     renderer.layout();
   };
 
-  // ?still=1&t=N draws one frame N seconds into the spin, for screenshots.
+  function advanceSimulation(seconds) {
+    const steps = Math.floor(seconds / fixedStep);
+    for (let i = 0; i < steps; i++) simulation.step(fixedStep);
+  }
+
+  // ?still=1&t=N advances both simulation and spin by N seconds.
   if (params.get('still') === '1') {
-    renderer.draw(Number(params.get('t')) || 0);
+    const seconds = Number(params.get('t')) || 0;
+    advanceSimulation(seconds);
+    renderer.draw(seconds);
     renderer.draw(0);
     paper.view.update();
     return;
@@ -26,9 +39,25 @@
     const frames = Number(params.get('frames')) || 600;
     const update = [];
     const total = [];
+    const countItems = function (item) {
+      let count = 1;
+      if (item.children) {
+        for (let i = 0; i < item.children.length; i++) count += countItems(item.children[i]);
+      }
+      return count;
+    };
+    const itemCount = function () {
+      let count = 0;
+      for (let i = 0; i < paper.project.layers.length; i++) {
+        count += countItems(paper.project.layers[i]);
+      }
+      return count;
+    };
+    const itemsBefore = itemCount();
     for (let i = 0; i < frames; i++) {
       const t0 = performance.now();
-      renderer.draw(1 / 60);
+      simulation.step(fixedStep);
+      renderer.draw(fixedStep);
       const t1 = performance.now();
       paper.view.update();
       const t2 = performance.now();
@@ -43,13 +72,23 @@
     const pre = document.createElement('pre');
     pre.id = 'diag';
     pre.textContent = renderer.stats.neurons + ' neurons, ' + renderer.stats.axons + ' axons, ' +
-      renderer.stats.schwannCells + ' Schwann cells, ' + frames + ' frames\nupdate ' +
-      summary(update) + '\nupdate+draw ' + summary(total);
+      renderer.stats.schwannCells + ' Schwann cells, ' + renderer.stats.domains +
+      ' domains, ' + simulation.stats.cohorts + ' cohorts, ' +
+      simulation.stats.housed + ' housed, ' + frames + ' frames\nupdate ' +
+      summary(update) + '\nupdate+draw ' + summary(total) + '\npaper items ' +
+      itemsBefore + ' -> ' + itemCount();
     document.body.appendChild(pre);
     return;
   }
 
+  let accumulator = 0;
   paper.view.onFrame = function (event) {
-    renderer.draw(Math.min(event.delta, 0.05));
+    const delta = Math.min(event.delta, 0.05);
+    accumulator += delta;
+    while (accumulator >= fixedStep) {
+      simulation.step(fixedStep);
+      accumulator -= fixedStep;
+    }
+    renderer.draw(delta);
   };
 })(window);
