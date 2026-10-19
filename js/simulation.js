@@ -21,17 +21,34 @@
     const KINDS = config.kinds;
     const LEARN = config.learning;
     const SLEEP = config.sleep;
-    const CATEGORY_COUNT = anchors.length;
-    const BAND_SIZE = config.categories.cols;
+    const CATEGORY_COUNT = config.categories.count;
+    const SCHWANN = config.schwannPerAxon || 5;
+    const FAMILY_SIZES = config.categories.familySizes;
+    const FAMILY_OF = [];
+    for (let band = 0; band < FAMILY_SIZES.length; band++) {
+      for (let n = 0; n < FAMILY_SIZES[band]; n++) FAMILY_OF.push(band);
+    }
     const CATEGORY_WEIGHTS = config.categories.weights.slice();
     const WEIGHT_SUM = CATEGORY_WEIGHTS.reduce(function (sum, weight) {
       return sum + weight;
     }, 0);
     const domains = [];
     const settledCount = new Array(CATEGORY_COUNT);
+    // One clockwise radial sweep per category. Rebuilt only when its ring
+    // finishes or the domain grows, so a housing is an O(1) cursor step.
+    const sweeps = [];
     for (let i = 0; i < CATEGORY_COUNT; i++) {
       domains.push({ neurons: [], radius: 1 });
       settledCount[i] = 0;
+      sweeps.push({
+        ring: 1,
+        axons: [],
+        sources: [],
+        orders: [],
+        nextCell: [],
+        cursor: 0,
+        dirty: true
+      });
     }
 
     function pool(size, make) {
@@ -57,6 +74,8 @@
         inwardRow: 0,
         housingRoll: 0,
         rejected: false,
+        stage1Sleep: -1,
+        stage1Born: -1,
         x: 0,
         y: 0
       };
@@ -65,14 +84,17 @@
     const counters = pool(config.pools.counters, function (id) {
       return {
         id: id, active: false, x: 0, y: 0, vx: 0, vy: 0,
-        age: 0, ttl: 1, sourceId: -1, initialScale: 1
+        age: 0, ttl: 1, sourceId: -1, sourceCategory: -1,
+        triggerId: -1, triggerKind: '', burstId: -1, sizeClass: 0, initialScale: 1
       };
     });
+    const freeCounters = new Array(counters.length);
+    let freeTop = 0;
 
     // A crystal is an external thought that found a temporary home. It turns
     // orange and doubles in size ("temporary"); during sleep it detaches and
     // travels at three times its daytime speed ("wandering"), and turns light
-    // green once "settled" in one of the 21 permanent home clusters.
+    // green once "settled" in one of the permanent home clusters.
     const crystals = pool(config.pools.crystals, function (id) {
       return {
         id: id,
@@ -95,6 +117,8 @@
         tossAge: 0,
         tossTtl: 1,
         daySpeed: 1,
+        cohortSleep: -1,
+        cohortBorn: -1,
         nextInternal: Infinity,
         internalEvery: 0,
         angleA: 0,
@@ -125,11 +149,35 @@
     }
 
     const s = {};
+    const INTERNAL = config.internal;
+    const SIZE_CLASSES = [INTERNAL.sizes.medium, INTERNAL.sizes.large, INTERNAL.sizes.xlarge];
+    const SIZE_NAMES = ['medium', 'large', 'xlarge'];
+    const centerOrder = new Array(CATEGORY_COUNT);
+    const latestBurst = {
+      burstId: -1,
+      triggerId: -1,
+      triggerKind: '',
+      sourceCategories: [],
+      sizeClasses: []
+    };
     let centers = [];
     let asleep = false;
+    // Thoughts that were unsettled when this sleep began. Object identity
+    // plus bornAt, so a recycled pool slot cannot stay in the cohort.
+    let remCohort = [];
+    // External thoughts still traveling when sleep began. Identity is the
+    // pool object plus bornAt, so a reused slot cannot hold Stage 1 open.
+    let stage1Cohort = [];
     const STAGES = config.stages;
     const LUST = config.lust;
-    const BASE_THRESHOLD = SLEEP.needThreshold * config.pools.crystals;
+    const SECONDS_PER_HOUR = SLEEP.secondsPerHour || 2;
+    // ln(hours) is linear in ln(unsettled count) between these anchors.
+    const SLEEP_ANCHORS = [
+      { u: 5, hours: 18 },
+      { u: 8, hours: 12 },
+      { u: 13, hours: 8 },
+      { u: 21, hours: 4 }
+    ];
 
     // ---------- Life stage ----------
 
@@ -161,8 +209,89 @@
       };
     }
 
-    function sleepThreshold() {
-      return Math.max(1, Math.round(BASE_THRESHOLD * stageAt(s.age).threshold));
+    // Hours from unsettled count alone. The anchors are exact; between them
+    // ln(hours) moves linearly with ln(U). Outside, the curve is flat.
+    function unsettledHours(U) {
+      if (U <= SLEEP_ANCHORS[0].u) return SLEEP_ANCHORS[0].hours;
+      const last = SLEEP_ANCHORS[SLEEP_ANCHORS.length - 1];
+      if (U >= last.u) return last.hours;
+      for (let i = 1; i < SLEEP_ANCHORS.length; i++) {
+        const a = SLEEP_ANCHORS[i - 1];
+        const b = SLEEP_ANCHORS[i];
+        if (U > b.u) continue;
+        const t = (Math.log(U) - Math.log(a.u)) / (Math.log(b.u) - Math.log(a.u));
+        return Math.exp(Math.log(a.hours) + (Math.log(b.hours) - Math.log(a.hours)) * t);
+      }
+      return last.hours;
+    }
+
+    // Duration in hours. Unsettled count sets the length. Crystallized
+    // thoughts only shorten it, and only when permanent knowledge is ahead
+    // of the onset curve U = 5*C/13. On that curve the multiplier is 1.
+    function sleepHours(U, C) {
+      const base = unsettledHours(U);
+      const onsetC = CATEGORY_COUNT * U / SLEEP_ANCHORS[0].u;
+      if (!(C > onsetC) || !(C > 0)) return base;
+      return base * clamp((CATEGORY_COUNT * U) / (SLEEP_ANCHORS[0].u * C), 0.5, 1);
+    }
+
+    function crystallizedCount() {
+      return countActive('settled');
+    }
+
+    function unsettledCount() {
+      return countActive('temporary') + countActive('wandering');
+    }
+
+    function countActive(state) {
+      let n = 0;
+      for (let i = 0; i < crystals.length; i++) {
+        if (crystals[i].active && crystals[i].state === state) n++;
+      }
+      return n;
+    }
+
+    // More permanent thoughts mean more unsettled ones are tolerated.
+    // At the 13 seeds this is exactly 5.
+    function sleepThresholdFor(crystallized) {
+      return Math.max(SLEEP_ANCHORS[0].u, Math.round(SLEEP_ANCHORS[0].u * crystallized / CATEGORY_COUNT));
+    }
+
+    function cohortOpen(c) {
+      return c.cohortSleep === s.sleeps && c.bornAt === c.cohortBorn && c.active &&
+        (c.state === 'temporary' || c.state === 'wandering');
+    }
+
+    function remRemainingCount() {
+      let n = 0;
+      for (let i = 0; i < remCohort.length; i++) {
+        if (cohortOpen(remCohort[i])) n++;
+      }
+      return n;
+    }
+
+    function refreshSleepCounts() {
+      s.crystallized = crystallizedCount();
+      s.unsettled = unsettledCount();
+      s.threshold = sleepThresholdFor(s.crystallized);
+      if (!asleep) {
+        s.sleepHours = sleepHours(s.unsettled, s.crystallized);
+        s.sleepSeconds = s.sleepHours * SECONDS_PER_HOUR;
+        s.remRemaining = 0;
+      } else {
+        s.remRemaining = remRemainingCount();
+      }
+    }
+
+    // If migration ever misses a kept cohort thought, start it wandering.
+    // Wandering already ends at the anchor or at maxTravel. Nothing is tossed
+    // here just to finish the clock.
+    function releaseStuckCohort() {
+      for (let i = 0; i < remCohort.length; i++) {
+        const c = remCohort[i];
+        if (!cohortOpen(c) || c.state !== 'temporary') continue;
+        if (c.kept) startWandering(c, classify(c, c.site), c.site);
+      }
     }
 
     // ---------- Lust for learning ----------
@@ -172,7 +301,7 @@
     }
 
     function housingChance() {
-      return clamp(s.lust / 100, 0, 1);
+      return clamp((s.lust / 100) * learningRate(s.age), 0, 1);
     }
 
     function stepLust(dt) {
@@ -200,7 +329,7 @@
     // Dimensionless bead size, before the renderer's pixel scale. External
     // thoughts use kind size times their shrinking travel scale. An orange
     // temporary or wandering home is exactly 2× its kind. An internal thought
-    // stores that number at birth and shrinks it to zero over its own life.
+    // draws medium, large, or xlarge at birth and shrinks that to zero.
     function thoughtVisualSize(p) {
       return KINDS[p.kind].size * thoughtScale(p.age, p.ttl, p.rejected);
     }
@@ -248,6 +377,60 @@
       return clamp(strongest * 0.72 + sum / adjacent.length * 0.28, 0, 1);
     }
 
+    // Saturation to age. The rising anchors are the table's coverage column.
+    // 95% and anything above it is age 90; the age-80 row shares that plateau.
+    const SAT_AGE = [
+      { sat: 0, age: 0 },
+      { sat: 0.25, age: 10 },
+      { sat: 0.50, age: 20 },
+      { sat: 0.68, age: 30 },
+      { sat: 0.78, age: 40 },
+      { sat: 0.85, age: 50 },
+      { sat: 0.90, age: 60 },
+      { sat: 0.93, age: 70 },
+      { sat: 0.95, age: 90 }
+    ];
+    const RATE_AGE = [
+      { age: 0, rate: 1 },
+      { age: 10, rate: 0.95 },
+      { age: 20, rate: 0.70 },
+      { age: 30, rate: 0.50 },
+      { age: 40, rate: 0.40 },
+      { age: 50, rate: 0.35 },
+      { age: 60, rate: 0.30 },
+      { age: 70, rate: 0.20 },
+      { age: 80, rate: 0.12 },
+      { age: 90, rate: 0.05 }
+    ];
+
+    function ageFromSaturation(sat) {
+      if (sat <= SAT_AGE[0].sat) return SAT_AGE[0].age;
+      const last = SAT_AGE[SAT_AGE.length - 1];
+      if (sat >= last.sat) return last.age;
+      for (let i = 1; i < SAT_AGE.length; i++) {
+        const a = SAT_AGE[i - 1];
+        const b = SAT_AGE[i];
+        if (sat > b.sat) continue;
+        const t = (sat - a.sat) / (b.sat - a.sat);
+        return a.age + t * (b.age - a.age);
+      }
+      return last.age;
+    }
+
+    function learningRate(age) {
+      if (age <= RATE_AGE[0].age) return RATE_AGE[0].rate;
+      const last = RATE_AGE[RATE_AGE.length - 1];
+      if (age >= last.age) return last.rate;
+      for (let i = 1; i < RATE_AGE.length; i++) {
+        const a = RATE_AGE[i - 1];
+        const b = RATE_AGE[i];
+        if (age > b.age) continue;
+        const t = (age - a.age) / (b.age - a.age);
+        return a.rate + t * (b.rate - a.rate);
+      }
+      return last.rate;
+    }
+
     function lifeProgress() {
       return clamp(s.peakSaturation / LIFE.saturationLimit, 0, 1);
     }
@@ -260,9 +443,8 @@
       return 1 - smoothstep(0, 1, lifeProgress());
     }
 
-    // Age 0–100 maps to 0–90 degrees: growth is fast in youth and slows with
-    // age. Since age itself comes from saturation, a pure cosine would only
-    // approach the 80% limit asymptotically, so a small floor lets life end.
+    // Latent deposit still eases with age. The new-knowledge rate, not this
+    // cosine, decides whether a kept thought colors a Schwann cell.
     function growthFactor() {
       if (s.finishedAt >= 0) return 0;
       return Math.max(LIFE.growthFloor, Math.cos(s.age * 0.9 * Math.PI / 180) - 0.0001);
@@ -279,35 +461,28 @@
     }
 
     // Age follows the highest saturation reached, so consolidation during
-    // sleep never makes the brain younger.
+    // sleep never makes the brain younger. Saturation is purple Schwann
+    // cells over every cell. Five equal compartments make a count ratio
+    // the same as a length ratio. The peak never falls.
     function refreshKnowledge() {
       if (!knowledgeDirty) return;
       knowledgeDirty = false;
-      let covered = 0;
-      for (let i = 0; i < edges.length; i++) {
-        const edge = edges[i];
-        if (edge.seedAt < 0) continue;
-        const interval = seedInterval(edge);
-        covered += (interval.end - interval.start) * edge.length;
-      }
-      s.saturation = covered / network.totalLength;
+      const total = edges.length * SCHWANN;
+      s.saturation = total ? s.purpleSchwannCells / total : 0;
       s.peakSaturation = Math.max(s.peakSaturation, s.saturation);
-      s.age = LIFE.maxAge * lifeProgress();
-      if (s.peakSaturation >= LIFE.saturationLimit - LIFE.epsilon) {
-        s.age = LIFE.maxAge;
-        if (s.finishedAt < 0) s.finishedAt = s.time;
-      }
+      s.age = ageFromSaturation(s.peakSaturation);
+      s.learningRate = learningRate(s.age);
 
       centers = [];
       for (let i = 0; i < neurons.length; i++) {
         const neuron = neurons[i];
-        neuron.strength = neuron.domain >= 0 ? centerStrength(neuron) : 0;
+        neuron.strength = neuron.crystal || 0;
         if (neuron.strength >= config.centerMin) centers.push(neuron);
       }
     }
 
-    // Any neuron can temporarily house a thought. Thickness only biases
-    // which neurons answer an arrival with an internal thought.
+    // Any neuron can temporarily house a thought. Internal responses do not
+    // come from these hosts; they leave from the configured category anchors.
     function hostCenters() {
       return neurons;
     }
@@ -332,22 +507,22 @@
     }
 
     function movesInward(p, from, dest) {
-      const dc = dest.col - from.col;
-      const dr = dest.row - from.row;
-      if (p.inwardCol > 0 && dc < 0) return false;
-      if (p.inwardCol < 0 && dc > 0) return false;
-      if (p.inwardRow > 0 && dr < 0) return false;
-      if (p.inwardRow < 0 && dr > 0) return false;
-      if (p.inwardCol !== 0 && (dc === p.inwardCol || dc === 0)) return true;
-      if (p.inwardRow !== 0 && (dr === p.inwardRow || dr === 0)) return true;
+      const dc = dest.homeX - from.homeX;
+      const dr = dest.homeY - from.homeY;
+      if (p.inwardCol > 0 && dc < -0.15) return false;
+      if (p.inwardCol < 0 && dc > 0.15) return false;
+      if (p.inwardRow > 0 && dr < -0.15) return false;
+      if (p.inwardRow < 0 && dr > 0.15) return false;
+      if (p.inwardCol !== 0 && (dc * p.inwardCol > 0.15 || Math.abs(dc) <= 0.15)) return true;
+      if (p.inwardRow !== 0 && (dr * p.inwardRow > 0.15 || Math.abs(dr) <= 0.15)) return true;
       return false;
     }
 
     function reachedFarSide(p, node) {
-      if (p.inwardCol > 0 && node.col >= COLS - 1) return true;
-      if (p.inwardCol < 0 && node.col <= 0) return true;
-      if (p.inwardRow > 0 && node.row >= ROWS - 1) return true;
-      if (p.inwardRow < 0 && node.row <= 0) return true;
+      if (p.inwardCol > 0 && node.onRight) return true;
+      if (p.inwardCol < 0 && node.onLeft) return true;
+      if (p.inwardRow > 0 && node.onBottom) return true;
+      if (p.inwardRow < 0 && node.onTop) return true;
       return false;
     }
 
@@ -373,10 +548,10 @@
       const home = kind.home * lerp(0.12, 1, filters);
       let total = 0;
       const weights = options.map(function (option) {
-        const dc = option.dest.col - node.col;
-        const dr = option.dest.row - node.row;
-        const inwardStep = (p.inwardCol !== 0 && dc === p.inwardCol) ||
-          (p.inwardRow !== 0 && dr === p.inwardRow);
+        const dc = option.dest.homeX - node.homeX;
+        const dr = option.dest.homeY - node.homeY;
+        const inwardStep = (p.inwardCol !== 0 && dc * p.inwardCol > 0.15) ||
+          (p.inwardRow !== 0 && dr * p.inwardRow > 0.15);
         const knowledge = option.edge.strength * 0.62 + option.dest.strength * 0.38;
         const weight = (inwardStep ? 1.6 : 0.28) +
           home * 24 * knowledge * knowledge +
@@ -429,6 +604,22 @@
       p.edge = null;
     }
 
+    function deactivateCounter(c) {
+      if (!c.active) return;
+      c.active = false;
+      freeCounters[freeTop++] = c;
+      s.activeCounterCount--;
+    }
+
+    function rebuildFreeCounters() {
+      freeTop = 0;
+      s.activeCounterCount = 0;
+      for (let i = 0; i < counters.length; i++) {
+        counters[i].active = false;
+        freeCounters[freeTop++] = counters[i];
+      }
+    }
+
     function completeJourney(p) {
       s.completedJourneys++;
       s.journeyTime += s.time - p.bornAt;
@@ -440,23 +631,18 @@
 
       const serial = s.serial++;
       const side = Math.floor(hash(serial, 1.3) * 4);
-      const slot = Math.floor(hash(serial, 2.7) * (side < 2 ? ROWS : COLS));
-      let start;
+      const border = side === 0 ? network.borders.left
+        : side === 1 ? network.borders.right
+        : side === 2 ? network.borders.top
+        : network.borders.bottom;
+      const slot = Math.floor(hash(serial, 2.7) * border.length);
+      const start = border[slot];
       p.inwardCol = 0;
       p.inwardRow = 0;
-      if (side === 0) {
-        start = network.nodeAt(0, slot);
-        p.inwardCol = 1;
-      } else if (side === 1) {
-        start = network.nodeAt(COLS - 1, slot);
-        p.inwardCol = -1;
-      } else if (side === 2) {
-        start = network.nodeAt(slot, 0);
-        p.inwardRow = 1;
-      } else {
-        start = network.nodeAt(slot, ROWS - 1);
-        p.inwardRow = -1;
-      }
+      if (side === 0) p.inwardCol = 1;
+      else if (side === 1) p.inwardCol = -1;
+      else if (side === 2) p.inwardRow = 1;
+      else p.inwardRow = -1;
 
       const kind = chooseKind(serial);
       const spec = KINDS[kind];
@@ -465,6 +651,8 @@
       p.age = 0;
       p.rejected = false;
       p.bornAt = s.time;
+      p.stage1Sleep = -1;
+      p.stage1Born = -1;
       p.ttl = lerp(spec.ttlMin, spec.ttlMax, hash(serial, 6.6)) * lerp(0.75, 1, riskAffinity());
       p.speed = lerp(130, 205, hash(serial, 9.1)) / 72 * spec.speed;
       s.born[kind]++;
@@ -493,7 +681,7 @@
       p.active = true;
       enterEdge(p, first);
       placeThought(p);
-      if (hash(serial, 23.9) < housingChance()) emitCounters(p, serial);
+      if (p.housingRoll < housingChance()) emitAcceptanceBurst(p);
     }
 
     function stepThoughts(dt) {
@@ -544,140 +732,130 @@
 
     // ---------- Internal counter-thoughts ----------
 
-    function emitCounter(neuron, serial, index, visualSize) {
-      const c = takeFree(counters);
-      if (!c || !neuron) return false;
-      const ageRatio = s.age / LIFE.maxAge;
-      const angle = hash(serial * 2.17, index * 5.91 + 0.3) * Math.PI * 2;
-      const speed = lerp(48, 155, hash(serial, index + 11.4)) / 72 * (asleep ? 1.25 : 1);
-      c.active = true;
-      c.x = neuron.x;
-      c.y = neuron.y;
-      c.vx = Math.cos(angle) * speed;
-      c.vy = Math.sin(angle) * speed;
-      c.age = 0;
-      c.ttl = (lerp(7.2, 1.15, ageRatio) +
-        hash(serial * 1.7, index * 3.1 + 0.4) * lerp(1.8, 0.65, ageRatio)) *
-        (asleep ? 1.8 : 1);
-      c.sourceId = neuron.id;
-      c.initialScale = visualSize > 0 ? visualSize : 1;
-      s.countersEmitted++;
-      return true;
-    }
-
-    // Each unsettled crystal has its own cadence, staggered by identity so a
-    // full pool does not fire on the same frame. Sleep shortens the wait but
-    // does not create thoughts on its own.
-    function internalInterval(c) {
-      const span = config.internal.intervalMax - config.internal.intervalMin;
-      const base = config.internal.intervalMin + hash(c.id, 2.8) * span;
-      return asleep ? base * config.internal.sleepScale : base;
-    }
-
+    // Each temporary or wandering home repeats on its own hashed 3–6s gap,
+    // so a crowd of homes does not pulse together.
     function scheduleInternal(c) {
-      const every = internalInterval(c);
+      const span = INTERNAL.intervalMax - INTERNAL.intervalMin;
+      const every = INTERNAL.intervalMin + hash(c.id + 4096, c.bornAt + 2.8) * span;
       c.internalEvery = every;
       c.nextInternal = s.time + every;
       s.intervalMinSeen = Math.min(s.intervalMinSeen, every);
       s.intervalMaxSeen = Math.max(s.intervalMaxSeen, every);
     }
 
-    function permanentAnchors() {
-      const seen = {};
-      const list = [];
-      crystals.forEach(function (c) {
-        if (!c.active || c.state !== 'settled' || c.category < 0 || seen[c.category]) return;
-        seen[c.category] = true;
-        list.push(anchors[c.category]);
-      });
-      return list;
-    }
-
-    function siteNeuron(c) {
-      if (c.state === 'temporary' && c.site) return c.site;
-      let best = null;
-      let bestD = Infinity;
-      for (let i = 0; i < neurons.length; i++) {
-        const neuron = neurons[i];
-        const d = (neuron.x - c.x) * (neuron.x - c.x) + (neuron.y - c.y) * (neuron.y - c.y);
-        if (d < bestD) {
-          bestD = d;
-          best = neuron;
-        }
-      }
-      return best;
-    }
-
-    // One internal thought per unsettled crystal per interval. It leaves
-    // either the crystal's own site or, about half the time, a cluster that
-    // already has a permanent member.
-    function emitFromUnsettled(c) {
-      const homes = permanentAnchors();
-      const useHome = homes.length > 0 && hash(c.id * 9.3, s.time * 3.1 + c.id) >= 0.5;
-      const neuron = useHome
-        ? homes[Math.floor(hash(c.id, s.time + 2.2) * homes.length)]
-        : siteNeuron(c);
-      if (!emitCounter(neuron, c.id * 17 + s.internalFromUnsettled, 1, crystalVisualSize(c))) return;
-      s.internalFromUnsettled++;
-      if (useHome) s.fromPermanent++;
-      else s.fromTemporary++;
-    }
-
-    function stepUnsettledEmissions() {
-      crystals.forEach(function (c) {
-        if (!c.active || c.state === 'settled' || c.state === 'tossed') return;
-        if (s.time < c.nextInternal) return;
-        emitFromUnsettled(c);
-        scheduleInternal(c);
-      });
-    }
-
-    function emitCounters(trigger, serial) {
-      const hosts = hostCenters();
-      if (!hosts.length || !trigger) return;
-      const visualSize = thoughtVisualSize(trigger);
-      const spread = asleep ? 3 : Math.min(3, hosts.length);
-      const count = Math.min(
-        hosts.length,
-        (asleep ? 2 : 1) + Math.floor(hash(serial, 17.2) * spread)
-      );
-      const candidates = hosts.slice();
+    // Hash-picked distinct centers: a partial Fisher-Yates over a reused
+    // index array, so no allocation per burst.
+    function pickCenters(salt, count) {
+      for (let i = 0; i < CATEGORY_COUNT; i++) centerOrder[i] = i;
       for (let i = 0; i < count; i++) {
-        let total = 0;
-        const weights = candidates.map(function (neuron) {
-          const weight = 0.15 + neuron.strength;
-          total += weight;
-          return weight;
-        });
-        let choice = hash(serial * 1.9 + i * 4.7, 8.2) * total;
-        let index = candidates.length - 1;
-        for (let j = 0; j < candidates.length; j++) {
-          choice -= weights[j];
-          if (choice <= 0) {
-            index = j;
-            break;
-          }
+        const j = i + Math.floor(hash(salt * 1.31 + i, 57.3) * (CATEGORY_COUNT - i));
+        const swap = centerOrder[i];
+        centerOrder[i] = centerOrder[j];
+        centerOrder[j] = swap;
+      }
+    }
+
+    function sizeClassFor(salt, index) {
+      const roll = hash(salt * 0.73 + index * 1.91, 33.1);
+      if (roll < 1 / 3) return 0;
+      if (roll < 2 / 3) return 1;
+      return 2;
+    }
+
+    // `count` distinct centers, all or nothing. A short pool drops the whole
+    // burst rather than answer from fewer centers than intended.
+    function emitBurst(triggerId, triggerKind, salt, count) {
+      if (freeTop < count || count > CATEGORY_COUNT) {
+        s.droppedInternalBursts++;
+        return false;
+      }
+      const burstId = s.nextBurstId++;
+      const ageRatio = s.age / LIFE.maxAge;
+      pickCenters(salt + burstId * 0.37, count);
+      s.internalBursts++;
+      latestBurst.burstId = burstId;
+      latestBurst.triggerId = triggerId;
+      latestBurst.triggerKind = triggerKind;
+      latestBurst.sourceCategories.length = 0;
+      latestBurst.sizeClasses.length = 0;
+      for (let k = 0; k < count; k++) {
+        const cat = centerOrder[k];
+        const neuron = anchors[cat];
+        const c = freeCounters[--freeTop];
+        const sizeClass = sizeClassFor(salt + burstId, k);
+        const angle = hash(salt * 2.17 + cat, burstId * 0.17 + 0.3) * Math.PI * 2;
+        const speed = lerp(48, 155, hash(salt, cat + 11.4)) / 72 * (asleep ? 1.25 : 1);
+        c.active = true;
+        c.x = neuron.x;
+        c.y = neuron.y;
+        c.vx = Math.cos(angle) * speed;
+        c.vy = Math.sin(angle) * speed;
+        c.age = 0;
+        c.ttl = lerp(INTERNAL.ttlMin, INTERNAL.ttlMax, hash(salt, cat * 3.1 + 0.4)) *
+          lerp(1, 0.72, ageRatio) * (asleep ? INTERNAL.sleepTtl : 1);
+        c.sourceId = neuron.id;
+        c.sourceCategory = cat;
+        c.triggerId = triggerId;
+        c.triggerKind = triggerKind;
+        c.burstId = burstId;
+        c.sizeClass = sizeClass;
+        c.initialScale = SIZE_CLASSES[sizeClass];
+        latestBurst.sourceCategories.push(cat);
+        latestBurst.sizeClasses.push(SIZE_NAMES[sizeClass]);
+        s.sizeClassCounts[sizeClass]++;
+        s.internalParticles++;
+        s.countersEmitted++;
+      }
+      s.activeCounterCount += count;
+      if (s.activeCounterCount > s.peakActiveCounters) {
+        s.peakActiveCounters = s.activeCounterCount;
+      }
+      return true;
+    }
+
+    // Once, at acceptance: seven distinct centers, or every center when
+    // the configured set is smaller than that.
+    function emitAcceptanceBurst(p) {
+      const count = Math.min(INTERNAL.acceptCount, CATEGORY_COUNT);
+      if (emitBurst(p.id, 'thought', p.id * 17 + p.bornAt, count)) {
+        s.acceptanceBursts++;
+      }
+    }
+
+    // Each tick of a temporary or wandering home: one to three distinct
+    // centers, any of the configured set.
+    function stepInternalEmissions() {
+      for (let i = 0; i < crystals.length; i++) {
+        const c = crystals[i];
+        if (!c.active || (c.state !== 'temporary' && c.state !== 'wandering')) continue;
+        if (s.time < c.nextInternal) continue;
+        const salt = c.id * 17 + c.bornAt + s.internalBursts;
+        const count = 1 + Math.floor(hash(salt, 71.9) * INTERNAL.homeMax);
+        const n = Math.min(count, INTERNAL.homeMax, CATEGORY_COUNT);
+        if (emitBurst(c.id, 'crystal', salt, n)) {
+          s.homeBursts++;
         }
-        emitCounter(candidates[index], serial, i, visualSize);
-        candidates.splice(index, 1);
+        c.nextInternal = s.time + c.internalEvery;
       }
     }
 
     function stepCounters(dt) {
-      const margin = 0.15;
-      counters.forEach(function (c) {
-        if (!c.active) return;
+      const margin = 0.2;
+      for (let i = 0; i < counters.length; i++) {
+        const c = counters[i];
+        if (!c.active) continue;
         c.age += dt;
+        if (c.age >= c.ttl) {
+          deactivateCounter(c);
+          continue;
+        }
         c.x += c.vx * dt;
         c.y += c.vy * dt;
-        if (
-          c.age >= c.ttl ||
-          c.x < -margin || c.y < -margin ||
-          c.x > COLS + margin || c.y > ROWS + margin
-        ) {
-          c.active = false;
-        }
-      });
+        if (c.x < margin) { c.x = margin; c.vx = Math.abs(c.vx); }
+        else if (c.x > COLS - margin) { c.x = COLS - margin; c.vx = -Math.abs(c.vx); }
+        if (c.y < margin) { c.y = margin; c.vy = Math.abs(c.vy); }
+        else if (c.y > ROWS - margin) { c.y = ROWS - margin; c.vy = -Math.abs(c.vy); }
+      }
     }
 
     // ---------- Crystallization ----------
@@ -730,6 +908,8 @@
       c.site = null;
       c.category = -1;
       c.nextInternal = Infinity;
+      c.cohortSleep = -1;
+      c.cohortBorn = -1;
       c.judged = false;
       c.kept = true;
       if (category >= 0) {
@@ -762,7 +942,7 @@
 
     function crystallizePair(p, counter, neuron) {
       hideThought(p);
-      counter.active = false;
+      deactivateCounter(counter);
       s.crystallizations++;
       s.homed[p.kind]++;
       const c = takeCrystal();
@@ -962,7 +1142,7 @@
         const distance = Math.hypot(anchor.x - from.x, anchor.y - from.y);
         const ideal = total * CATEGORY_WEIGHTS[i] / WEIGHT_SUM;
         const score = (counts[i] + 1) - ideal +
-          (Math.floor(i / BAND_SIZE) === band ? 0 : 0.55) +
+          (FAMILY_OF[i] === band ? 0 : 0.55) +
           0.03 * distance +
           hash(c.id + i, s.serial) * 0.04;
         if (score < bestScore) {
@@ -1020,6 +1200,14 @@
         domains[i].neurons = [anchors[i]];
         anchors[i].domain = i;
         domains[i].radius = initialRadius(i);
+        const sweep = sweeps[i];
+        sweep.ring = 1;
+        sweep.axons.length = 0;
+        sweep.sources.length = 0;
+        sweep.orders.length = 0;
+        sweep.nextCell.length = 0;
+        sweep.cursor = 0;
+        sweep.dirty = true;
       }
     }
 
@@ -1063,54 +1251,278 @@
       domain.radius = radius;
     }
 
-    function feedNeuron(neuron, amount) {
-      const adjacent = neuron.adjacent;
-      if (!adjacent.length || amount <= 0) return;
-      const share = amount / adjacent.length;
-      s.fed += amount;
-      adjacent.forEach(function (edge) {
-        const near = edge.from === neuron ? 0.14 : 0.86;
-        if (edge.seedAt < 0) {
-          edge.seedAt = near;
-          edge.strength = share;
-          s.seedEvents++;
-        } else {
-          edge.seedAt = lerp(edge.seedAt, near, 0.25);
-          edge.strength = clamp(edge.strength + share, 0, 1);
-        }
-      });
-      neuron.strength = centerStrength(neuron);
-      touchKnowledge();
+    // An axon another category already owns, or that ends on another
+    // category's neuron, is not ours to paint.
+    function axonEligible(edge, neuron) {
+      if (edge.owner >= 0 && edge.owner !== neuron.domain) return false;
+      const other = edge.from === neuron ? edge.to : edge.from;
+      return other.domain < 0 || other.domain === neuron.domain;
     }
 
-    function thickenDomain(cat, amount) {
+    function neuronFull(neuron) {
+      const adj = neuron.adjacent;
+      let eligible = 0;
+      for (let i = 0; i < adj.length; i++) {
+        const edge = adj[i];
+        if (!axonEligible(edge, neuron)) continue;
+        eligible++;
+        if (edge.purpleCount < edge.cells.length) return false;
+      }
+      return eligible > 0;
+    }
+
+    function coverageOf(neuron) {
+      const adj = neuron.adjacent;
+      let purple = 0;
+      let total = 0;
+      for (let i = 0; i < adj.length; i++) {
+        const edge = adj[i];
+        if (!axonEligible(edge, neuron)) continue;
+        purple += edge.purpleCount;
+        total += edge.cells.length;
+      }
+      return total ? purple / total : 0;
+    }
+
+    // crystal 1 means every eligible axon of this neuron is fully purple,
+    // which is what lets the domain grow. Partial coverage stays below that.
+    function noteNeuron(neuron) {
+      if (!neuron || neuron.domain < 0) return;
+      const full = neuronFull(neuron);
+      neuron.crystal = full ? 1 : coverageOf(neuron);
+      neuron.strength = neuron.crystal;
+      if (!full) return;
+      const cat = neuron.domain;
+      const before = domains[cat].neurons.length;
       expandDomain(cat);
-      let target = null;
-      domains[cat].neurons.forEach(function (neuron) {
-        if (neuron.strength >= 0.999) return;
-        if (!target || neuron.strength < target.strength) target = neuron;
-      });
-      if (!target) return;
-      feedNeuron(target, amount);
-      if (target.strength >= 0.999) expandDomain(cat);
+      if (domains[cat].neurons.length !== before) sweeps[cat].dirty = true;
     }
 
-    function feedAnchor(anchor, amount) {
-      const adjacent = anchor.adjacent;
-      if (!adjacent.length || amount <= 0) return;
-      const share = amount / adjacent.length;
-      s.fed += amount;
-      adjacent.forEach(function (edge) {
-        const near = edge.from === anchor ? 0.14 : 0.86;
-        if (edge.seedAt < 0) {
-          edge.seedAt = near;
-          edge.strength = share;
-          s.seedEvents++;
-        } else {
-          edge.seedAt = lerp(edge.seedAt, near, 0.25);
-          edge.strength = clamp(edge.strength + share, 0, 1);
+    function orderFrom(edge, neuron) {
+      const order = [];
+      if (edge.from === neuron) {
+        for (let i = 0; i < edge.cells.length; i++) order.push(i);
+      } else {
+        for (let i = edge.cells.length - 1; i >= 0; i--) order.push(i);
+      }
+      return order;
+    }
+
+    // Screen coordinates: y grows downward. 0 is 12 o'clock (straight up)
+    // and the angle increases clockwise. atan2(dx, -dy) is that angle.
+    function clockwiseAngle(origin, point) {
+      let angle = Math.atan2(point.x - origin.x, -(point.y - origin.y));
+      if (angle < 0) angle += Math.PI * 2;
+      return angle;
+    }
+
+    function otherEnd(edge, neuron) {
+      return edge.from === neuron ? edge.to : edge.from;
+    }
+
+    function dist2(a, b) {
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      return dx * dx + dy * dy;
+    }
+
+    function firstOpen(edge, order) {
+      for (let k = 0; k < order.length; k++) {
+        if (!edge.cells[order[k]]) return k;
+      }
+      return order.length;
+    }
+
+    function ringDone(sweep) {
+      if (!sweep.axons.length) return true;
+      for (let i = 0; i < sweep.axons.length; i++) {
+        if (sweep.nextCell[i] < sweep.orders[i].length) return false;
+      }
+      return true;
+    }
+
+    // BFS layers of neurons already inside this category. Layer 0 is the hub.
+    function domainLayers(cat) {
+      const anchor = anchors[cat];
+      const depth = {};
+      depth[anchor.id] = 0;
+      const layers = [[anchor]];
+      for (let d = 0; d < layers.length; d++) {
+        const layer = layers[d];
+        const next = [];
+        for (let i = 0; i < layer.length; i++) {
+          const neuron = layer[i];
+          const adj = neuron.adjacent;
+          for (let e = 0; e < adj.length; e++) {
+            const other = otherEnd(adj[e], neuron);
+            if (other.domain !== cat || depth[other.id] !== undefined) continue;
+            depth[other.id] = d + 1;
+            next.push(other);
+          }
         }
+        if (next.length) layers.push(next);
+      }
+      return { depth: depth, layers: layers };
+    }
+
+    function sortClockwise(list, origin, pointOf) {
+      list.sort(function (a, b) {
+        const aa = clockwiseAngle(origin, pointOf(a));
+        const bb = clockwiseAngle(origin, pointOf(b));
+        if (aa < bb - 1e-9) return -1;
+        if (aa > bb + 1e-9) return 1;
+        return a.id - b.id;
       });
+    }
+
+    // Axons this ring paints, nearest cell first along each one. Ring 1 is
+    // every spoke off the hub. Later rings take each neuron's axons that do
+    // not lead back toward the hub.
+    function collectRing(cat, ring, anchor, depth, layers) {
+      const axons = [];
+      const sources = [];
+      const orders = [];
+      const nextCell = [];
+      function push(edge, source) {
+        if (edge.owner >= 0 && edge.owner !== cat) return;
+        const other = otherEnd(edge, source);
+        if (other.domain >= 0 && other.domain !== cat) return;
+        const order = orderFrom(edge, source);
+        const openAt = firstOpen(edge, order);
+        if (openAt >= order.length) return;
+        axons.push(edge);
+        sources.push(source);
+        orders.push(order);
+        nextCell.push(openAt);
+      }
+      if (ring <= 1) {
+        const spokes = anchor.adjacent.slice();
+        sortClockwise(spokes, anchor, function (edge) { return otherEnd(edge, anchor); });
+        for (let i = 0; i < spokes.length; i++) push(spokes[i], anchor);
+        return { axons: axons, sources: sources, orders: orders, nextCell: nextCell };
+      }
+      const layer = layers[ring - 1];
+      if (!layer || !layer.length) {
+        return { axons: axons, sources: sources, orders: orders, nextCell: nextCell };
+      }
+      const neuronsIn = layer.slice();
+      sortClockwise(neuronsIn, anchor, function (neuron) { return neuron; });
+      const listed = {};
+      const perNeuron = [];
+      let widest = 0;
+      for (let n = 0; n < neuronsIn.length; n++) {
+        const neuron = neuronsIn[n];
+        const myDepth = depth[neuron.id];
+        const myDist = dist2(neuron, anchor);
+        const outward = [];
+        const adj = neuron.adjacent;
+        for (let e = 0; e < adj.length; e++) {
+          const edge = adj[e];
+          if (listed[edge.id]) continue;
+          if (edge.owner >= 0 && edge.owner !== cat) continue;
+          const other = otherEnd(edge, neuron);
+          if (other.domain >= 0 && other.domain !== cat) continue;
+          if (dist2(other, anchor) + 1e-9 < myDist) continue;
+          if (depth[other.id] !== undefined && depth[other.id] < myDepth) continue;
+          if (depth[other.id] === myDepth) {
+            const mine = clockwiseAngle(anchor, neuron);
+            const theirs = clockwiseAngle(anchor, other);
+            if (theirs < mine - 1e-12) continue;
+            if (Math.abs(theirs - mine) <= 1e-12 && other.id < neuron.id) continue;
+          }
+          outward.push(edge);
+          listed[edge.id] = true;
+        }
+        sortClockwise(outward, neuron, function (edge) { return otherEnd(edge, neuron); });
+        perNeuron.push({ neuron: neuron, axons: outward });
+        if (outward.length > widest) widest = outward.length;
+      }
+      // One axon from each neuron per pass, so the sweep goes around the
+      // ring instead of finishing one neuron before the next.
+      for (let slot = 0; slot < widest; slot++) {
+        for (let n = 0; n < perNeuron.length; n++) {
+          const edge = perNeuron[n].axons[slot];
+          if (edge) push(edge, perNeuron[n].neuron);
+        }
+      }
+      return { axons: axons, sources: sources, orders: orders, nextCell: nextCell };
+    }
+
+    function buildSweep(cat) {
+      const sweep = sweeps[cat];
+      const anchor = anchors[cat];
+      const built = domainLayers(cat);
+      const maxRing = Math.max(sweep.ring, built.layers.length);
+      for (let ring = sweep.ring; ring <= maxRing; ring++) {
+        const ringAxons = collectRing(cat, ring, anchor, built.depth, built.layers);
+        if (!ringAxons.axons.length) continue;
+        sweep.ring = ring;
+        sweep.axons = ringAxons.axons;
+        sweep.sources = ringAxons.sources;
+        sweep.orders = ringAxons.orders;
+        sweep.nextCell = ringAxons.nextCell;
+        sweep.cursor = 0;
+        sweep.dirty = false;
+        return true;
+      }
+      sweep.axons = [];
+      sweep.sources = [];
+      sweep.orders = [];
+      sweep.nextCell = [];
+      sweep.cursor = 0;
+      sweep.dirty = false;
+      return false;
+    }
+
+    function finishRing(sweep) {
+      sweep.ring++;
+      sweep.axons = [];
+      sweep.sources = [];
+      sweep.orders = [];
+      sweep.nextCell = [];
+      sweep.cursor = 0;
+      sweep.dirty = true;
+    }
+
+    // One permanent housing paints one Schwann cell. Ring 1 goes clockwise
+    // around the hub, one cell on each spoke per lap, nearest the hub first.
+    // The next ring starts only after that ring is fully purple.
+    function myelinateOne(cat) {
+      if (cat < 0 || cat >= CATEGORY_COUNT) return false;
+      const sweep = sweeps[cat];
+      if (!sweep.axons.length || (sweep.dirty && ringDone(sweep))) {
+        if (!buildSweep(cat)) return false;
+      }
+      const count = sweep.axons.length;
+      for (let tries = 0; tries < count; tries++) {
+        const i = sweep.cursor;
+        sweep.cursor = (i + 1) % count;
+        if (sweep.nextCell[i] >= sweep.orders[i].length) continue;
+        const edge = sweep.axons[i];
+        if ((edge.owner >= 0 && edge.owner !== cat) || !axonEligible(edge, sweep.sources[i])) {
+          sweep.nextCell[i] = sweep.orders[i].length;
+          continue;
+        }
+        const idx = sweep.orders[i][sweep.nextCell[i]];
+        if (edge.cells[idx]) {
+          sweep.nextCell[i]++;
+          continue;
+        }
+        edge.cells[idx] = 1;
+        edge.purpleCount++;
+        if (edge.owner < 0) edge.owner = cat;
+        sweep.nextCell[i]++;
+        s.purpleSchwannCells++;
+        s.seedEvents++;
+        if (edge.purpleCount === edge.cells.length) s.fullyCrystallizedAxons++;
+        noteNeuron(edge.from);
+        noteNeuron(edge.to);
+        touchKnowledge();
+        if (ringDone(sweep)) finishRing(sweep);
+        return true;
+      }
+      finishRing(sweep);
+      return myelinateOne(cat);
     }
 
     // Once per thought per sleep: keep it for a permanent home, or toss it.
@@ -1153,14 +1565,16 @@
       const heading = Math.atan2(anchor.y - origin.y, anchor.x - origin.x) +
         (hash(c.id * 1.3, s.time * 0.7 + category) - 0.5) * 1.6;
       const speed = travelSpeed(c);
+      const wasSettled = c.state === 'settled';
       const keepSchedule = c.state === 'temporary' && c.nextInternal > s.time;
-      if (c.state === 'settled') {
+      if (wasSettled) {
         c.judged = true;
         c.kept = true;
       }
       c.state = 'wandering';
       c.category = category;
-      if (!keepSchedule) scheduleInternal(c);
+      if (wasSettled) c.nextInternal = Infinity;
+      else if (!keepSchedule) scheduleInternal(c);
       c.x = origin.x;
       c.y = origin.y;
       c.vx = Math.cos(heading) * speed;
@@ -1176,12 +1590,47 @@
       s.migrations++;
     }
 
+    // One permanent thought per hub at birth. Kind follows the hub's family.
+    // Each seed paints exactly one Schwann cell, the first clockwise spoke.
+    function plantSeeds() {
+      const kindName = ['danger', 'attraction', 'ordinary'];
+      for (let i = 0; i < CATEGORY_COUNT; i++) {
+        const c = takeFree(crystals);
+        const anchor = anchors[i];
+        c.active = true;
+        c.state = 'settled';
+        c.kind = kindName[FAMILY_OF[i]] || 'ordinary';
+        c.bornAt = 0;
+        c.settledAt = 0;
+        c.site = anchor;
+        c.category = i;
+        c.slot = 0;
+        c.judged = true;
+        c.kept = true;
+        c.carried = 0;
+        c.nextInternal = Infinity;
+        c.internalEvery = Infinity;
+        settledCount[i] = 1;
+        const offset = slotOffset(0, 1, domains[i].radius);
+        c.x = anchor.x + offset.x;
+        c.y = anchor.y + offset.y;
+        c.vx = 0;
+        c.vy = 0;
+        myelinateOne(i);
+      }
+    }
+
+    // A kept thought always gains a permanent home. It colors a Schwann cell
+    // only when a stable roll falls under the age's new-knowledge rate.
     function settle(c) {
       const anchor = anchors[c.category];
       c.state = 'settled';
       c.settledAt = s.time;
       c.site = anchor;
-      thickenDomain(c.category, c.carried + SLEEP.consolidationBonus * growthFactor());
+      const rate = learningRate(s.age);
+      if (hash(c.id * 9.17 + c.bornAt * 0.13, s.sleeps * 2.2 + 4.4) < rate) {
+        myelinateOne(c.category);
+      }
       c.carried = 0;
       c.nextInternal = Infinity;
       settledCount[c.category]++;
@@ -1327,13 +1776,15 @@
       crystals.forEach(function (c) {
         if (!c.active) return;
         if (c.state === 'settled') glideSettled(c, dt);
-        else if (c.state === 'wandering' && asleep) moveWanderer(c, dt);
+        else if (c.state === 'wandering' && asleep && !s.inStage1) moveWanderer(c, dt);
         else if (c.state === 'tossed') {
           c.tossAge += dt;
           if (c.tossAge >= c.tossTtl) hideCrystal(c);
         }
       });
-      if (!asleep) return;
+      // Stage 1 still lets travelers fade or find a temporary home. Tossing,
+      // the flight to a permanent cluster, and rebalancing wait for REM.
+      if (!asleep || s.inStage1) return;
 
       // Detach fast enough that the night's backlog is on its way within the
       // first part of REM, however short this age makes the night.
@@ -1379,9 +1830,15 @@
         faded: 0,
         filtered: 0,
         countersEmitted: 0,
-        internalFromUnsettled: 0,
-        fromTemporary: 0,
-        fromPermanent: 0,
+        internalBursts: 0,
+        acceptanceBursts: 0,
+        homeBursts: 0,
+        sizeClassCounts: [0, 0, 0],
+        internalParticles: 0,
+        droppedInternalBursts: 0,
+        peakActiveCounters: 0,
+        nextBurstId: 1,
+        activeCounterCount: 0,
         intervalMinSeen: Infinity,
         intervalMaxSeen: 0,
         completedJourneys: 0,
@@ -1419,44 +1876,76 @@
         insignificant: 0,
         lust: 100,
         lustHeld: false,
-        threshold: Math.max(1, Math.round(BASE_THRESHOLD * STAGES[0].threshold)),
+        threshold: 5,
+        sleepHours: 18,
+        sleepSeconds: 36,
+        crystallized: 0,
+        unsettled: 0,
+        onsetUnsettled: 0,
+        onsetCrystallized: 0,
         awakeDuration: 0,
         sleepAge: 0,
         sleepRatio: 0,
         sleepTarget: 0,
         remTarget: 0,
+        inStage1: false,
+        stage1StartedAt: -1,
+        stage1Seconds: 0,
+        stage1Remaining: 0,
+        stage1CohortSize: 0,
+        stage1SafetyTrips: 0,
+        calculatedRemSeconds: 18,
+        actualRemSeconds: 0,
+        remCohortSize: 0,
+        remRemaining: 0,
+        deepTargetSeconds: 18,
+        remSafetyTrips: 0,
         keepChance: STAGES[0].keep,
         keptThisSleep: 0,
         tossedThisSleep: 0,
-        tossedTotal: 0
+        tossedTotal: 0,
+        purpleSchwannCells: 0,
+        fullyCrystallizedAxons: 0
       });
       waves.forEach(function (wave) {
         wave.active = false;
         wave.age = 0;
       });
       asleep = false;
+      remCohort = [];
+      stage1Cohort = [];
       edges.forEach(function (edge) {
         edge.seedAt = -1;
         edge.strength = 0;
         edge.traversals = 0;
+        edge.purpleCount = 0;
+        edge.owner = -1;
+        for (let i = 0; i < edge.cells.length; i++) edge.cells[i] = 0;
       });
       neurons.forEach(function (neuron) {
         neuron.pending = 0;
         neuron.strength = 0;
+        neuron.crystal = 0;
       });
       for (let i = 0; i < CATEGORY_COUNT; i++) settledCount[i] = 0;
       knowledgeDirty = true;
       initDomains();
       thoughts.forEach(hideThought);
-      counters.forEach(function (c) {
-        c.active = false;
-      });
+      rebuildFreeCounters();
+      latestBurst.burstId = -1;
+      latestBurst.triggerId = -1;
+      latestBurst.triggerKind = '';
+      latestBurst.sourceCategories.length = 0;
+      latestBurst.sizeClasses.length = 0;
       crystals.forEach(function (c) {
         c.active = false;
         c.state = 'temporary';
         c.site = null;
         c.category = -1;
+        c.nextInternal = Infinity;
       });
+      plantSeeds();
+      refreshSleepCounts();
       refreshKnowledge();
     }
 
@@ -1478,6 +1967,7 @@
     }
 
     function finishDeepWork() {
+      if (remRemainingCount() > 0) s.remSafetyTrips++;
       crystals.forEach(function (c) {
         if (!c.active || c.state !== 'temporary') return;
         if (judge(c)) startWandering(c, classify(c, c.site), c.site);
@@ -1526,12 +2016,76 @@
       else setPhase('awake', s.need);
     }
 
-    // At sleep onset the age decides how long the night is: the awake bout
-    // times sleepHours / awakeHours. REM takes the first half and deep sleep
-    // the second, so deep always equals the REM just finished.
+    // A Stage 1 thought is finished once it has faded, been rejected, been
+    // recycled, or found a temporary home (which clears active).
+    function stage1Open(p) {
+      return p.stage1Sleep === s.sleeps && p.bornAt === p.stage1Born &&
+        p.active && !p.rejected;
+    }
+
+    function stage1RemainingCount() {
+      let n = 0;
+      for (let i = 0; i < stage1Cohort.length; i++) {
+        if (stage1Open(stage1Cohort[i])) n++;
+      }
+      return n;
+    }
+
+    function captureStage1Cohort() {
+      stage1Cohort = [];
+      thoughts.forEach(function (p) {
+        if (!p.active) return;
+        p.stage1Sleep = s.sleeps;
+        p.stage1Born = p.bornAt;
+        stage1Cohort.push(p);
+      });
+      s.stage1CohortSize = stage1Cohort.length;
+      s.stage1Remaining = stage1RemainingCount();
+    }
+
+    // REM cohort is whoever holds a temporary or wandering home when Stage 1
+    // ends: homes that were already waiting, plus any thought that found a
+    // home during Stage 1. Faded travelers never become crystals.
+    function beginRem() {
+      s.inStage1 = false;
+      s.stage1Seconds = Math.max(0, s.time - s.stage1StartedAt);
+      s.stage1Remaining = 0;
+      remCohort = [];
+      crystals.forEach(function (c) {
+        if (!c.active) return;
+        if (c.state !== 'temporary' && c.state !== 'wandering') return;
+        c.cohortSleep = s.sleeps;
+        c.cohortBorn = c.bornAt;
+        remCohort.push(c);
+      });
+      s.remCohortSize = remCohort.length;
+      s.sleepBacklog = Math.max(1, remCohort.length);
+      s.remStartedAt = s.time;
+      s.remDuration = 0;
+      s.actualRemSeconds = 0;
+      s.deepDuration = 0;
+      s.keptThisSleep = 0;
+      s.tossedThisSleep = 0;
+      s.remSafetyNoted = false;
+      crystals.forEach(function (c) {
+        if (c.active) judge(c);
+      });
+      s.remRemaining = remRemainingCount();
+    }
+
+    // Night length is fixed from U and C at the original onset. Stage 1 lets
+    // travelers finish first. Calculated REM is half of that night, and deep
+    // sleep is exactly that half. Actual REM is at least the calculated half,
+    // and longer while the REM cohort is still temporary or wandering.
     function fallAsleep(pending) {
       const stage = stageAt(s.age);
+      const unsettled = pending.temporary + pending.wandering;
+      const crystallized = crystallizedCount();
+      const hours = sleepHours(unsettled, crystallized);
+      const seconds = hours * SECONDS_PER_HOUR;
+      const calculated = seconds / 2;
       asleep = true;
+      s.inStage1 = true;
       s.awakeDuration = s.stateTime;
       s.stateTime = 0;
       s.sleeps++;
@@ -1539,60 +2093,97 @@
       s.sleepAge = s.age;
       s.sleepRatio = stage.ratio;
       s.keepChance = stage.keep;
-      s.sleepTarget = s.awakeDuration * stage.ratio;
-      s.remTarget = s.sleepTarget / 2;
-      s.sleepBacklog = Math.max(1, pending.temporary + pending.wandering);
-      s.remStartedAt = s.time;
-      s.remDuration = 0;
-      s.deepDuration = 0;
-      s.deepTarget = 0;
-      s.keptThisSleep = 0;
-      s.tossedThisSleep = 0;
-      crystals.forEach(function (c) {
-        if (c.active) judge(c);
-      });
+      s.sleepHours = hours;
+      s.sleepSeconds = seconds;
+      s.onsetUnsettled = unsettled;
+      s.onsetCrystallized = crystallized;
+      s.sleepTarget = seconds;
+      s.calculatedRemSeconds = calculated;
+      s.remTarget = calculated;
+      s.deepTargetSeconds = calculated;
+      s.deepTarget = calculated;
+      s.actualRemSeconds = 0;
+      s.remCohortSize = 0;
+      s.remRemaining = 0;
+      remCohort = [];
+      s.stage1StartedAt = s.time;
+      s.stage1Seconds = 0;
+      s.stage1SafetyNoted = false;
+      s.housingsAtStage1 = s.crystallizations;
+      captureStage1Cohort();
     }
 
     function updateSleepState(dt) {
       s.stateTime += dt;
       const pending = pendingCrystals();
-      s.threshold = sleepThreshold();
-      s.need = clamp(pending.temporary / s.threshold, 0, 1);
+      refreshSleepCounts();
+      s.need = s.threshold > 0 ? clamp(s.unsettled / s.threshold, 0, 1) : 0;
       if (!asleep) {
         s.reorganized = 1;
         s.inDeep = false;
-        if (s.finishedAt < 0 && s.stateTime >= SLEEP.minAwake && s.need >= 1) {
+        if (s.finishedAt < 0 && s.unsettled >= s.threshold) {
           fallAsleep(pending);
-        } else {
-          assignAwakePhase();
-          s.phaseElapsed = s.phase === 'waking' ? s.stateTime : 0;
+          s.phaseElapsed = 0;
+          setPhase('stage1', 0);
           return;
         }
+        assignAwakePhase();
+        s.phaseElapsed = s.phase === 'waking' ? s.stateTime : 0;
+        return;
+      }
+
+      if (s.inStage1) {
+        s.stage1Seconds = Math.max(0, s.time - s.stage1StartedAt);
+        s.stage1Remaining = stage1RemainingCount();
+        s.phaseElapsed = s.stage1Seconds;
+        if (s.stage1Remaining > 0 && s.stage1Seconds > 14 && !s.stage1SafetyNoted) {
+          s.stage1SafetyNoted = true;
+          s.stage1SafetyTrips++;
+        }
+        // The onset frame always shows Stage 1. An empty cohort leaves on
+        // the next substep, once stage1Seconds has moved.
+        if (s.stage1Remaining > 0 || s.stage1Seconds <= 0) {
+          setPhase('stage1', 1);
+          return;
+        }
+        beginRem();
       }
 
       if (s.inDeep) {
         s.deepDuration = s.time - s.deepStartedAt;
         s.phaseElapsed = s.deepDuration;
-        const span = Math.max(s.deepTarget, STEP);
+        const span = Math.max(s.deepTargetSeconds, STEP);
         setPhase('deep', clamp(s.deepDuration / span, 0, 1));
         s.reorganized = clamp(s.deepDuration / span, 0, 1);
-        if (s.deepDuration + 1e-8 >= s.deepTarget) wakeFromDeep();
+        if (s.deepDuration + 1e-8 >= s.deepTargetSeconds) wakeFromDeep();
         return;
       }
 
-      const remaining = pending.temporary + pending.wandering;
+      s.remRemaining = remRemainingCount();
+      const remaining = s.remRemaining;
       s.sleepBacklog = Math.max(s.sleepBacklog, remaining, 1);
       const travelShare = remaining / s.sleepBacklog;
       s.reorganized = clamp(1 - travelShare, 0, 1);
       s.remDuration = s.time - s.remStartedAt;
+      s.actualRemSeconds = s.remDuration;
       s.phaseElapsed = s.remDuration;
-      if (s.remDuration + 1e-8 < Math.max(s.remTarget, STEP)) {
+      const timeReached = s.remDuration + 1e-8 >= Math.max(s.calculatedRemSeconds, STEP);
+      if (s.remRemaining > 0 && s.remDuration > s.calculatedRemSeconds + SLEEP.maxTravel + 2) {
+        if (!s.remSafetyNoted) {
+          s.remSafetyNoted = true;
+          s.remSafetyTrips++;
+          releaseStuckCohort();
+        }
+      }
+      if (!timeReached || s.remRemaining > 0) {
         setPhase('rem', clamp(1 - travelShare, 0, 1));
         return;
       }
       s.inDeep = true;
       s.deepStartedAt = s.time;
-      s.deepTarget = s.remDuration;
+      s.actualRemSeconds = s.remDuration;
+      s.deepTarget = s.calculatedRemSeconds;
+      s.deepTargetSeconds = s.calculatedRemSeconds;
       s.deepDuration = 0;
       s.phaseElapsed = 0;
       setPhase('deep', 0);
@@ -1613,7 +2204,7 @@
       resolveCrystals();
       stepWaves(dt);
       stepCrystals(dt);
-      stepUnsettledEmissions();
+      stepInternalEmissions();
       refreshKnowledge();
       stepLust(dt);
       updateSleepState(dt);
@@ -1664,6 +2255,20 @@
       out.lastAwakeDuration = s.awakeDuration;
       out.sleepTarget = s.sleepTarget;
       out.remTarget = s.remTarget;
+      out.learningRate = learningRate(s.age);
+      if (out.saturation == null) out.saturation = s.saturation;
+      out.peakSaturation = s.peakSaturation;
+      out.brainSaturation = out.saturation;
+      out.peakBrainSaturation = s.peakSaturation;
+      out.stage1Seconds = s.stage1Seconds;
+      out.stage1Remaining = s.stage1Remaining;
+      out.stage1CohortSize = s.stage1CohortSize;
+      out.calculatedRemSeconds = s.calculatedRemSeconds;
+      out.actualRemSeconds = s.actualRemSeconds;
+      out.remCohortSize = s.remCohortSize;
+      out.remRemaining = s.remRemaining;
+      out.deepTargetSeconds = s.deepTargetSeconds;
+      out.remSafetyTrips = s.remSafetyTrips;
       out.remDuration = s.remDuration;
       out.deepDuration = s.deepDuration;
       out.deepTarget = s.deepTarget;
@@ -1675,12 +2280,20 @@
       out.lustForced = lustForced();
       out.housingChance = housingChance();
       out.sleepThreshold = s.threshold;
+      out.sleepHours = s.sleepHours;
+      out.sleepSeconds = s.sleepSeconds;
+      out.crystallized = s.crystallized;
+      out.unsettled = s.unsettled;
+      out.onsetUnsettled = s.onsetUnsettled;
+      out.onsetCrystallized = s.onsetCrystallized;
       out.rewardWaves = s.rewardWaves;
       out.stressWaves = s.stressWaves;
       return out;
     }
 
     function snapshot() {
+      refreshKnowledge();
+      refreshSleepCounts();
       return lifeFields({
         time: s.time,
         saturation: s.saturation,
@@ -1703,10 +2316,15 @@
     }
 
     function stats() {
+      refreshKnowledge();
+      refreshSleepCounts();
       const counts = categoryCounts();
       return lifeFields({
         neurons: neurons.length,
         edges: edges.length,
+        cols: COLS,
+        rows: ROWS,
+        rowLengths: network.rowLengths,
         time: s.time,
         age: s.age,
         saturation: s.saturation,
@@ -1724,11 +2342,26 @@
         activeCounters: count(counters, function (c) { return c.active; }),
         countersEmitted: s.countersEmitted,
         unsettledCrystals: count(crystals, function (c) {
-          return c.active && c.state !== 'settled';
+          return c.active && (c.state === 'temporary' || c.state === 'wandering');
         }),
-        internalEmissionsFromUnsettled: s.internalFromUnsettled,
-        internalFromTemporarySite: s.fromTemporary,
-        internalFromPermanentCluster: s.fromPermanent,
+        internalBursts: s.internalBursts,
+        acceptanceBursts: s.acceptanceBursts,
+        homeBursts: s.homeBursts,
+        internalSizeClasses: {
+          medium: s.sizeClassCounts[0],
+          large: s.sizeClassCounts[1],
+          xlarge: s.sizeClassCounts[2]
+        },
+        internalParticles: s.internalParticles,
+        droppedInternalBursts: s.droppedInternalBursts,
+        peakActiveCounters: s.peakActiveCounters,
+        latestBurst: {
+          burstId: latestBurst.burstId,
+          triggerId: latestBurst.triggerId,
+          triggerKind: latestBurst.triggerKind,
+          sourceCategories: latestBurst.sourceCategories.slice(),
+          sizeClasses: latestBurst.sizeClasses.slice()
+        },
         internalIntervalMin: s.intervalMinSeen === Infinity ? 0 : s.intervalMinSeen,
         internalIntervalMax: s.intervalMaxSeen,
         crystallizations: s.crystallizations,
@@ -1790,7 +2423,10 @@
           return sum;
         })(),
         activeWaves: count(waves, function (wave) { return wave.active; }),
-        waves: activeWaves()
+        waves: activeWaves(),
+        totalSchwannCells: edges.length * SCHWANN,
+        purpleSchwannCells: s.purpleSchwannCells,
+        fullyCrystallizedAxons: s.fullyCrystallizedAxons
       });
     }
 
@@ -1811,8 +2447,9 @@
     }
 
     function setPeak(value) {
-      s.peakSaturation = clamp(+value || 0, 0, LIFE.saturationLimit);
-      s.age = LIFE.maxAge * (s.peakSaturation / LIFE.saturationLimit);
+      s.peakSaturation = clamp(+value || 0, 0, 1);
+      s.age = ageFromSaturation(s.peakSaturation);
+      s.learningRate = learningRate(s.age);
       knowledgeDirty = true;
     }
 
@@ -1845,7 +2482,11 @@
       crystalVisualSize: crystalVisualSize,
       counterVisualSize: counterVisualSize,
       snapshot: snapshot,
-      stats: stats
+      stats: stats,
+      myelinateCategory: myelinateOne,
+      sleepHours: sleepHours,
+      ageFromSaturation: ageFromSaturation,
+      learningRate: learningRate
     };
   };
 })(typeof window !== 'undefined' ? window : globalThis);

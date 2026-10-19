@@ -7,7 +7,19 @@
   const view = paper.view;
 
   const config = PL.config;
-  const network = PL.createNetwork(config);
+  const params = new URLSearchParams(location.search);
+  // The lattice is chosen once, from the window this life opened in.
+  // Later resizes only refit the uniform scale.
+  function latticeFor(search) {
+    const count = config.network.count;
+    const spec = search.get('aspect');
+    const pair = spec && /^(\d+)x(\d+)$/i.exec(spec);
+    // 16x9 is a viewport shape, not a forced rectangle. 233 is prime.
+    if (pair) return PL.chooseLattice(count, +pair[1], +pair[2]);
+    if (spec && isFinite(parseFloat(spec))) return PL.chooseLattice(count, parseFloat(spec), 1);
+    return PL.chooseLattice(count, root.innerWidth || 1440, root.innerHeight || 900);
+  }
+  const network = PL.createNetwork(config, latticeFor(params));
   const sim = PL.createSimulation(network, config);
   const renderer = PL.createRenderer(paper, network, sim, config);
 
@@ -30,12 +42,12 @@
 
   // URL parameters. Sleep is automatic. lust=0..100 forces a starting value
   // that then slides back toward the natural equilibrium.
+  //   aspect=16x9  choose the staggered lattice for that viewport shape
   //   t=N      start N simulated seconds into a life
   //   still=1  freeze on that frame
   //   lust=N   start with lust forced to N
   //   diag=1   write stats JSON into <pre id="diag">
   //   bench=1  time N draw frames and write the result into #diag
-  const params = new URLSearchParams(location.search);
   const reducedMotion = root.matchMedia('(prefers-reduced-motion: reduce)').matches;
   let frozen = params.get('still') === '1' || params.get('bench') === '1' ||
     (reducedMotion && !params.has('t'));

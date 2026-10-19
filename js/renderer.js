@@ -74,8 +74,11 @@
     let paletteStep = 0;
     const PALETTE_STEPS = 40;
 
-    let sx = 1;
-    let sy = 1;
+    // Uniform scale. A wide lattice on a square window letterboxes; resize
+    // never rebuilds the lattice or the life.
+    let scale = 1;
+    let originX = 0;
+    let originY = 0;
     let cell = 1;
     let thoughtRadius = 1.75;
     let counterRadius = 1.55;
@@ -126,13 +129,22 @@
     const edgeViews = network.edges.map(function (edge) {
       const base = openPath();
       base.strokeColor = C.thinAxon;
-      return { edge: edge, base: base, thick: null, length: 1, key: '' };
+      return { edge: edge, base: base };
     });
-    edgeViews.forEach(function (ev) {
-      ev.thick = openPath();
-      ev.thick.strokeColor = C.knowledge;
-      ev.thick.strokeCap = 'butt';
-      ev.thick.visible = false;
+
+    // One path per Schwann cell, created once. Five per axon. Color changes
+    // reuse the path; nothing here is allocated per thought or per frame.
+    const SCHWANN_N = config.schwannPerAxon || 5;
+    const SCHWANN_GAP = 0.032;
+    const schwannViews = [];
+    network.edges.forEach(function (edge) {
+      const count = edge.cells ? edge.cells.length : SCHWANN_N;
+      for (let i = 0; i < count; i++) {
+        const path = openPath();
+        path.fillColor = null;
+        path.strokeColor = C.schwann;
+        schwannViews.push({ edge: edge, index: i, path: path, key: -1, mid: null });
+      }
     });
 
     const neuronViews = network.neurons.map(function (neuron) {
@@ -203,7 +215,6 @@
       PALETTE_KEYS.forEach(function (key) { P[key] = mix(C[key], NIGHT[key], t); });
       edgeViews.forEach(function (ev) {
         ev.base.strokeColor = P.thinAxon;
-        ev.thick.strokeColor = P.knowledge;
       });
       neuronViews.forEach(function (nv) {
         for (let i = 0; i < nv.dendrites.length; i++) nv.dendrites[i].strokeColor = P.dendrite;
@@ -227,6 +238,7 @@
           edge: mix(C.bgEdge, C.needEdge, blend)
         };
       }
+      if (snap.phase === 'stage1') return { center: C.stage1Center, edge: C.stage1Edge };
       if (snap.phase === 'rem') return { center: C.remCenter, edge: C.remEdge };
       if (snap.phase === 'deep') return { center: C.deepCenter, edge: C.deepEdge };
       if (snap.phase === 'waking') {
@@ -264,15 +276,18 @@
     }
 
     function px(x, y) {
-      return new Point(x * sx, y * sy);
+      return new Point(originX + x * scale, originY + y * scale);
     }
 
     function layout() {
       const width = view.size.width;
       const height = view.size.height;
-      sx = width / network.cols;
-      sy = height / network.rows;
-      cell = Math.min(sx, sy);
+      const worldW = network.worldWidth || network.cols;
+      const worldH = network.worldHeight || network.rows;
+      scale = Math.min(width / worldW, height / worldH);
+      originX = (width - worldW * scale) / 2;
+      originY = (height - worldH * scale) / 2;
+      cell = scale;
       thoughtRadius = Math.max(1.75, cell * 0.034);
       counterRadius = Math.max(1.55, cell * 0.028);
 
@@ -281,7 +296,6 @@
       paintBackground();
 
       const thinWidth = Math.max(0.55, cell * 0.0105);
-      const thickWidth = Math.max(2.3, cell * 0.075);
       edgeViews.forEach(function (ev) {
         const e = ev.edge;
         const p0 = px(e.p0.x, e.p0.y);
@@ -293,12 +307,11 @@
           new Segment(p3, p2.subtract(p3), null)
         ];
         ev.base.segments = segments;
-        ev.thick.segments = segments.map(function (s) { return s.clone(); });
         ev.base.strokeWidth = thinWidth;
-        ev.thick.strokeWidth = thickWidth;
-        ev.length = Math.max(1, ev.base.length);
-        ev.key = '';
       });
+
+      const desiredCell = Math.max(1.2, cell * 0.045);
+      for (let i = 0; i < schwannViews.length; i++) layoutSchwann(schwannViews[i], desiredCell);
 
       const somaRadius = Math.max(2.5, cell * 0.067);
       const dendriteLength = cell * 0.17;
@@ -323,44 +336,101 @@
         place(nv.soma, center.x, center.y, somaRadius);
         nv.soma.strokeColor = P.dendrite;
         nv.soma.strokeWidth = dendriteWidth / somaRadius;
-        place(nv.nucleus, center.x - somaRadius * 0.16, center.y - somaRadius * 0.1, somaRadius * 0.34);
+        place(nv.nucleus, center.x - somaRadius * 0.06, center.y - somaRadius * 0.04, somaRadius * 0.64);
         nv.shown = -1;
       });
 
       network.anchors.forEach(function (anchor, i) {
         const radius = Math.max(cell * 0.42, sim.domainRadius(i) * cell);
-        place(ringViews[i], anchor.x * sx, anchor.y * sy, radius);
+        place(ringViews[i], originX + anchor.x * scale, originY + anchor.y * scale, radius);
         ringViews[i].strokeWidth = Math.max(0.8, cell * 0.02) / radius;
         ringViews[i].dashArray = [3 / radius, 4 / radius];
       });
     }
 
-    function drawKnowledge() {
-      edgeViews.forEach(function (ev) {
-        const e = ev.edge;
-        const show = e.seedAt >= 0 && e.strength > 0.004;
-        if (!show) {
-          if (ev.thick.visible) ev.thick.visible = false;
-          ev.key = '';
-          return;
-        }
-        const interval = sim.seedInterval(e);
-        const key = interval.start.toFixed(3) + ':' + interval.end.toFixed(3);
-        if (key === ev.key && ev.thick.visible) return;
-        ev.key = key;
-        ev.thick.visible = true;
-        const before = ev.length * interval.start;
-        const filled = Math.max(0.1, ev.length * (interval.end - interval.start));
-        ev.thick.dashArray = [filled, ev.length * 2 + 2];
-        ev.thick.dashOffset = -before;
-      });
+    function lerpPoint(a, b, f) {
+      return new Point(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f);
+    }
 
+    function polylineLength(pts) {
+      let length = 0;
+      for (let i = 1; i < pts.length; i++) length += pts[i].getDistance(pts[i - 1]);
+      return length;
+    }
+
+    // Drop `dist` pixels from the start of a polyline. The round cap then
+    // ends on the compartment boundary instead of spilling into the gap.
+    function trimStart(pts, dist) {
+      let left = dist;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const seg = pts[i].getDistance(pts[i + 1]);
+        if (seg > left) {
+          const out = [lerpPoint(pts[i], pts[i + 1], seg ? left / seg : 0)];
+          for (let j = i + 1; j < pts.length; j++) out.push(pts[j]);
+          return out;
+        }
+        left -= seg;
+      }
+      return [pts[pts.length - 1]];
+    }
+
+    function compartmentPoints(edge, index) {
+      const slot = 1 / SCHWANN_N;
+      const t0 = index * slot + SCHWANN_GAP * 0.5;
+      const t1 = (index + 1) * slot - SCHWANN_GAP * 0.5;
+      const steps = 6;
+      const pts = [];
+      for (let s = 0; s <= steps; s++) {
+        const t = t0 + (t1 - t0) * (s / steps);
+        const g = network.pointOnEdge(edge, t);
+        pts.push(px(g.x, g.y));
+      }
+      return pts;
+    }
+
+    function layoutSchwann(view, desired) {
+      const pts = compartmentPoints(view.edge, view.index);
+      const arc = polylineLength(pts);
+      const width = Math.min(desired, Math.max(0.8, arc * 0.2));
+      const body = arc > width * 1.15 ? trimStart(trimStart(pts.slice().reverse(), width * 0.5).reverse(), width * 0.5) : pts;
+      view.path.segments = body;
+      view.path.strokeWidth = width;
+      view.mid = body[Math.floor(body.length / 2)] || pts[Math.floor(pts.length / 2)];
+      view.half = Math.max(2, polylineLength(body) * 0.5 + width * 0.5);
+      view.key = -1;
+    }
+
+    function paintSchwann(view) {
+      const purple = view.edge.cells && view.edge.cells[view.index] ? 1 : 0;
+      const key = purple ? 1000 : paletteStep;
+      if (view.key === key) return;
+      view.key = key;
+      if (!purple) {
+        view.path.strokeColor = P.schwann;
+        return;
+      }
+      const mid = view.mid || view.path.position;
+      // The highlight spans the whole cell, so one cell never reads as two.
+      const radius = view.half || Math.max(view.path.strokeWidth, 2);
+      view.path.strokeColor = {
+        gradient: { radial: true, stops: [C.schwannHighlight, C.schwannBody] },
+        origin: mid,
+        destination: mid.add(new Point(radius, 0))
+      };
+    }
+
+    function drawSchwann() {
+      for (let i = 0; i < schwannViews.length; i++) paintSchwann(schwannViews[i]);
+    }
+
+    // Somas and nuclei stay on the resting palette. Purple knowledge is the
+    // Schwann cells, not a tint of the whole neuron.
+    function drawKnowledge() {
       neuronViews.forEach(function (nv) {
-        const strength = nv.neuron.strength;
-        if (Math.abs(strength - nv.shown) < 0.004) return;
-        nv.shown = strength;
-        nv.soma.fillColor = mix(P.somaLight, P.somaDark, strength);
-        nv.nucleus.fillColor = mix(P.nucleusLight, P.nucleusDark, strength);
+        if (nv.shown === paletteStep) return;
+        nv.shown = paletteStep;
+        nv.soma.fillColor = P.somaLight;
+        nv.nucleus.fillColor = P.nucleusLight;
       });
     }
 
@@ -382,8 +452,8 @@
         const u = p.ttl > 0 ? p.age / p.ttl : 1;
         const fade = p.rejected ? Math.max(0, 1 - u) : fadeFor(p.age, p.ttl, 0.72);
         const radius = thoughtRadius * kind.size * sim.thoughtScale(p.age, p.ttl, p.rejected);
-        const x = p.x * sx;
-        const y = p.y * sy;
+        const x = originX + p.x * scale;
+        const y = originY + p.y * scale;
         if (tv.kind !== p.kind) {
           tv.kind = p.kind;
           tv.halo.fillColor = colors.color;
@@ -400,32 +470,44 @@
       });
     }
 
+    // Last frame's crowd. Many overlapping bursts share one opacity cap so
+    // the field stays readable; every category is still drawn.
+    let counterCrowd = 1;
+
     function drawCounters() {
-      sim.counters.forEach(function (c, i) {
+      let live = 0;
+      const counters = sim.counters;
+      for (let i = 0; i < counters.length; i++) {
+        const c = counters[i];
         const cv = counterViews[i];
         if (!c.active) {
-          cv.halo.visible = false;
-          cv.bead.visible = false;
-          return;
+          if (cv.halo.visible) {
+            cv.halo.visible = false;
+            cv.bead.visible = false;
+          }
+          continue;
         }
+        live++;
         const u = c.ttl > 0 ? c.age / c.ttl : 1;
         const fade = Math.max(0, 1 - Math.max(0, u - 0.62) / 0.38);
         const radius = thoughtRadius * sim.counterVisualSize(c);
-        const x = c.x * sx;
-        const y = c.y * sy;
         if (radius < 0.04) {
           cv.halo.visible = false;
           cv.bead.visible = false;
-          return;
+          continue;
         }
+        const x = originX + c.x * scale;
+        const y = originY + c.y * scale;
+        const beadOpacity = 0.94 * fade * (0.42 + 0.58 * counterCrowd);
         cv.halo.visible = true;
         place(cv.halo, x, y, radius * 3.4);
-        cv.halo.opacity = 0.16 * fade;
+        cv.halo.opacity = 0.16 * fade * counterCrowd;
         cv.bead.visible = true;
         place(cv.bead, x, y, radius);
         cv.bead.strokeWidth = 0.28;
-        cv.bead.opacity = 0.94 * fade;
-      });
+        cv.bead.opacity = beadOpacity;
+      }
+      counterCrowd = live > 72 ? 72 / live : 1;
     }
 
     // Temporary and traveling thoughts are drawn at crystalScale (2×). A
@@ -456,8 +538,8 @@
         }
         const radius = thoughtRadius * config.kinds[c.kind].size * crystalScale(c, i, now);
         const at = sim.crystalPosition(c);
-        const x = at.x * sx;
-        const y = at.y * sy;
+        const x = originX + at.x * scale;
+        const y = originY + at.y * scale;
 
         cv.bead.visible = true;
         place(cv.bead, x, y, radius);
@@ -494,7 +576,7 @@
         cv.halo.opacity = 0.14;
         const partner = sim.partnerPosition(c);
         cv.partner.visible = true;
-        place(cv.partner, partner.x * sx, partner.y * sy, counterRadius * 0.8);
+        place(cv.partner, originX + partner.x * scale, originY + partner.y * scale, counterRadius * 0.8);
         cv.partner.fillColor = P.counter;
         cv.partner.opacity = 0.55;
       });
@@ -507,7 +589,7 @@
       ringViews.forEach(function (ring, i) {
         const radius = Math.max(cell * 0.42, sim.domainRadius(i) * cell);
         const anchor = network.anchors[i];
-        place(ring, anchor.x * sx, anchor.y * sy, radius);
+        place(ring, originX + anchor.x * scale, originY + anchor.y * scale, radius);
         ring.strokeWidth = Math.max(0.8, cell * 0.02) / radius;
         const presence = asleep ? 0.62 : (counts[i] > 0 ? 0.34 : 0.1);
         const weight = 0.72 + 0.4 * (weights[i] / 1.8);
@@ -548,7 +630,7 @@
           viewW.path.fillColor = waveFills[wave.type] || waveFills.reward;
         }
         const u = clamp(wave.age / Math.max(wave.ttl, 0.001), 0, 1);
-        place(viewW.path, wave.x * sx, wave.y * sy, span * (0.045 + 0.74 * u));
+        place(viewW.path, originX + wave.x * scale, originY + wave.y * scale, span * (0.045 + 0.74 * u));
         const peak = wave.type === 'stress' ? 0.58 + 0.22 * mood.dark : 0.48;
         viewW.path.opacity = envelopes[i] * peak * scale;
         viewW.path.visible = viewW.path.opacity > 0.012;
@@ -559,6 +641,7 @@
       const asleep = snap.asleep;
       updateMood(snap);
       applyPalette();
+      drawSchwann();
       drawWaves(snap);
       drawKnowledge();
       drawRings(asleep);
@@ -567,6 +650,13 @@
       drawThoughts();
     }
 
-    return { layout: layout, draw: draw };
+    const canvas = view.element;
+    if (canvas && canvas.dataset) {
+      canvas.dataset.schwannItems = String(schwannViews.length);
+      const layer = paper.project && paper.project.activeLayer;
+      canvas.dataset.paperItems = String(layer && layer.children ? layer.children.length : 0);
+    }
+
+    return { layout: layout, draw: draw, schwannItems: schwannViews.length };
   };
 })(typeof window !== 'undefined' ? window : globalThis);

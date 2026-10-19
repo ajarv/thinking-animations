@@ -2,7 +2,7 @@
   'use strict';
   const PL = root.PaperLife = root.PaperLife || {};
 
-  // The status panel: saturation, age, life stage, the automatic sleep state,
+  // The status panel: brain saturation, age, life stage, the automatic sleep state,
   // the lust-for-learning slider, and the between-lives veil.
   PL.createHud = function (config, handlers) {
     const U = PL.util;
@@ -135,7 +135,7 @@
       }
       pending = null;
 
-      const percent = Math.round(snap.saturation * 100);
+      const percent = Math.round((snap.brainSaturation != null ? snap.brainSaturation : snap.saturation) * 100);
       const age = Math.floor(snap.age);
       kVal.textContent = percent + '%';
       kFill.style.width = percent + '%';
@@ -148,28 +148,37 @@
       const phaseLabel = {
         awake: 'Awake',
         'sleep-needed': 'Needs sleep',
+        stage1: 'Stage 1 sleep',
         rem: 'REM sleep',
         deep: 'Deep sleep',
         waking: 'Waking'
       };
-      if (phase === 'rem') {
+      if (phase === 'stage1') {
+        stateVal.textContent = 'Stage 1 sleep · ' + snap.phaseElapsed.toFixed(1) + 's';
+      } else if (phase === 'rem') {
         stateVal.textContent = 'REM sleep · ' + snap.phaseElapsed.toFixed(1) + 's';
       } else if (phase === 'deep') {
         stateVal.textContent = 'Deep sleep · ' + snap.deepTarget.toFixed(1) + 's';
       } else {
         stateVal.textContent = phaseLabel[phase] || 'Awake';
       }
-      if (phase === 'rem' || phase === 'deep') {
+      if (phase === 'stage1') {
+        needFill.style.width = (snap.stage1CohortSize
+          ? (1 - snap.stage1Remaining / snap.stage1CohortSize) * 100
+          : 100) + '%';
+        clusterInfo.textContent = snap.stage1Remaining + ' still traveling · ' +
+          snap.stage1CohortSize + ' at onset';
+      } else if (phase === 'rem' || phase === 'deep') {
         needFill.style.width = ((1 - snap.reorganized) * 100) + '%';
         clusterInfo.textContent = snap.settled + ' settled · ' + snap.wandering + ' traveling · ' +
-          snap.temporary + ' waiting · ' + snap.clusters + '/21 clusters';
+          snap.temporary + ' waiting · ' + snap.clusters + '/' + config.categories.count + ' clusters';
       } else if (phase === 'waking') {
         needFill.style.width = ((1 - snap.phaseBlend) * 100) + '%';
         clusterInfo.textContent = snap.settled + ' settled · waking';
       } else {
         needFill.style.width = (snap.need * 100) + '%';
-        clusterInfo.textContent = snap.temporary + '/' + snap.sleepThreshold +
-          ' temporarily homed · ' + snap.settled + ' settled';
+        clusterInfo.textContent = snap.unsettled + '/' + snap.sleepThreshold +
+          ' unsettled · ' + snap.crystallized + ' crystallized';
       }
 
       if (waveNote) {

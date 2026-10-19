@@ -161,6 +161,10 @@ canvas {
   transition: background 0.6s linear;
 }
 
+#needFill.stage1 {
+  background: linear-gradient(90deg, #e4dcf3, #b9a6d6);
+}
+
 #needFill.rem {
   background: linear-gradient(90deg, #d4eed8, #6fb27a);
 }

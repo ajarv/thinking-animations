@@ -2,20 +2,106 @@
   'use strict';
   const PL = root.PaperLife = root.PaperLife || {};
 
+  // Split `count` homes across the three families. Earlier bands take the
+  // remainder, so 13 is 5 danger, 4 attraction, 4 everyday. Weights cycle
+  // the seven-value pattern when a family is not exactly that long.
+  function categoryLayout(count, families, pattern) {
+    const base = Math.floor(count / families);
+    const extra = count % families;
+    const familySizes = [];
+    const weights = [];
+    for (let band = 0; band < families; band++) {
+      const size = base + (band < extra ? 1 : 0);
+      familySizes.push(size);
+      for (let i = 0; i < size; i++) weights.push(pattern[i % pattern.length]);
+    }
+    return {
+      count: count,
+      families: families,
+      familySizes: familySizes,
+      weightPattern: pattern.slice(),
+      weights: weights
+    };
+  }
+
+  // Row count for a staggered lattice of exactly `count` neurons. 233 is
+  // prime, so this does not look for a rectangular factor pair. R is chosen
+  // near sqrt(count / viewportAspect). Among nearby integers, the winner is
+  // the one whose nominal pixel pitch is closest on both axes under a
+  // uniform fit (screen-space spacing error).
+  PL.chooseLattice = function (count, width, height) {
+    const aspect = width / Math.max(height, 0.001);
+    const ideal = Math.sqrt(count / aspect);
+    const lo = Math.max(2, Math.floor(ideal) - 8);
+    const hi = Math.min(Math.floor(count / 2), Math.ceil(ideal) + 8);
+    let best = null;
+    let bestScore = Infinity;
+    for (let rows = lo; rows <= hi; rows++) {
+      const base = Math.floor(count / rows);
+      if (base < 2) continue;
+      const extra = count % rows;
+      const cols = base + (extra > 0 ? 1 : 0);
+      if (cols < 2) continue;
+      const scaleX = width / cols;
+      const scaleY = height / rows;
+      const pitchErr = Math.abs(scaleX - scaleY) / Math.max(scaleX, scaleY);
+      const score = pitchErr + Math.abs(rows - ideal) * 1e-6;
+      if (score < bestScore) {
+        bestScore = score;
+        best = { cols: cols, rows: rows, aspect: cols / rows, base: base, extra: extra };
+      }
+    }
+    return best;
+  };
+
+  // Longer rows (base+1) are spread from top to bottom, not bunched.
+  PL.staggeredRowLengths = function (count, rows) {
+    const base = Math.floor(count / rows);
+    const extra = count % rows;
+    const lengths = [];
+    let err = 0;
+    for (let r = 0; r < rows; r++) {
+      err += extra;
+      if (err >= rows) {
+        err -= rows;
+        lengths.push(base + 1);
+      } else {
+        lengths.push(base);
+      }
+    }
+    return lengths;
+  };
+
   PL.config = {
-    // 29 x 13 = 377 neurons, the first Fibonacci number above 300.
-    cols: 29,
-    rows: 13,
+    // 233 neurons, a prime, so the lattice is staggered rows rather than a
+    // rectangle. The row count follows the viewport aspect at load; a
+    // resize only refits the scale.
+    network: {
+      count: 89,
+      // Jitter amplitude, as a fraction of the one-unit lattice spacing.
+      jitterMin: 0.22,
+      jitterMax: 0.30,
+      // Nearest neurons stay at least this far apart, in lattice units.
+      minSpacing: 0.55
+    },
 
     pools: {
       thoughts: 144,
-      counters: 233,
+      // Acceptance bursts are 7 and home ticks are at most 3. The first night
+      // on the wide lattice drops none.
+      counters: 610,
+      // Crystal slots, not neurons. The sleep threshold is a share of this
+      // pool, so it stays at 377 to keep the first night about 18s in.
       crystals: 377
     },
 
     life: {
-      maxAge: 100,
+      // Age 90 is the plateau once purple coverage reaches 95%.
+      maxAge: 90,
+      // Border filters and natural lust still treat 80% coverage as maturity.
+      // It is not the end of life.
       saturationLimit: 0.8,
+      plateau: 0.95,
       epsilon: 0.001,
       growthFloor: 0.2,
       hold: 3
@@ -38,24 +124,35 @@
 
     spawnRate: 11,
     centerMin: 0.07,
+    // Each axon is five Schwann cells of equal arc length. One permanent
+    // housing turns exactly one eligible cell purple.
+    schwannPerAxon: 5,
     // Temporary and traveling thoughts are drawn at twice the size of the
     // thought that arrived. A permanent home shrinks back to 1×.
     crystalScale: 2,
     // Accepted thoughts enter large, shrink toward insignificance, and fade.
     // A temporary home ignores this curve and is drawn at crystalScale.
-    entryScale: 2.2,
+    entryScale: 3.4,
     fadeScale: 0.15,
     shrinkPower: 1.35,
     rejectTtlMin: 0.22,
     rejectTtlMax: 0.38,
 
-    // An unsettled thought (temporary or traveling) provokes one internal
-    // thought on its own schedule. Settled thoughts never do.
+    // An accepted thought fires 7 internal thoughts once, from hash-picked
+    // centers. A temporary or wandering home fires 1–3 more on each tick of
+    // its own 3–6s timer, until it settles or sleep tosses it.
     internal: {
-      intervalMin: 2.5,
-      intervalMax: 5.5,
-      sleepScale: 0.72,
-      // Visible size falls as initialScale * (1 − age/ttl) ^ shrinkPower.
+      acceptCount: 7,
+      homeMax: 3,
+      intervalMin: 3,
+      intervalMax: 6,
+      // Visual sizes, same units as kind size × scale. Mixed inside a burst.
+      sizes: { medium: 1.15, large: 2.1, xlarge: 3.4 },
+      // Awake lifetime. Sleep stretches it; age shortens it. The shrink
+      // curve is still initialScale * (1 − age/ttl) ^ shrinkPower.
+      ttlMin: 2.6,
+      ttlMax: 4.2,
+      sleepTtl: 1.35,
       shrinkPower: 1.2
     },
 
@@ -69,26 +166,22 @@
       rejectMax: 0.55
     },
 
-    // 21 permanent homes in three families of seven. cols and rows count
-    // the families, not a screen grid: the anchors are scattered. The same
-    // seven weights repeat in each family, about 0.6 to 1.8, so the biggest
-    // category holds about three times the smallest.
-    categories: {
-      cols: 7,
-      rows: 3,
-      weights: [
-        0.7, 1.5, 1.0, 1.8, 1.2, 0.6, 1.4,
-        0.7, 1.5, 1.0, 1.8, 1.2, 0.6, 1.4,
-        0.7, 1.5, 1.0, 1.8, 1.2, 0.6, 1.4
-      ]
-    },
+    // Permanent homes. `count` is the only size: anchors, weights, domains,
+    // and the cluster readout all follow it. Families are not a screen grid.
+    // The pattern runs about 0.6 to 1.8 and repeats inside a family when
+    // that family is longer than the pattern, or stops early when shorter.
+    categories: categoryLayout(13, 3, [0.7, 1.5, 1.0, 1.8, 1.2, 0.6, 1.4]),
 
     sleep: {
-      // Sleep starts once this share of the crystal pool (377) is temporarily
-      // homed, scaled by the life stage's threshold factor. The night then
-      // lasts awakeDuration × sleep/awake for that age: half REM, half deep.
+      // One simulated second per this many hours of the sleep-duration
+      // function. 18 hours is 36 seconds: 18 of calculated REM and 18 of
+      // deep. Actual REM lasts at least that half, and longer if the onset
+      // cohort is still unsettled.
+      secondsPerHour: 2,
+      // Kept so older notes still parse. Onset is unsettled vs crystallized,
+      // not this share of the crystal pool, and there is no minimum afternoon.
       needThreshold: 0.38,
-      minAwake: 8,
+      minAwake: 0,
       // needPhase is where "needs sleep" begins; the red blend is the need
       // itself and is full at 1. wakeBlend is how long waking eases from
       // deep dark gray back to light blue. tossFade is how long a tossed thought fades.
@@ -171,24 +264,33 @@
     ],
 
     colors: {
-      // Background cycle: light blue rested, light red sleep-starved, very
-      // light green REM, dark gray deep sleep, then light blue again. REM
-      // stays far paler than the settled thought beads.
+      // Background cycle: light blue rested, light red sleep-starved, pale
+      // lavender Stage 1, very light green REM, dark gray deep sleep, then
+      // light blue again. REM stays far paler than the settled thought beads.
       bgCenter: '#f6fbff',
       bgEdge: '#d8eaf7',
       needCenter: '#fff1f1',
       needEdge: '#f6d5d5',
+      stage1Center: '#f4f0fb',
+      stage1Edge: '#e4dcf3',
       remCenter: '#f3fbf4',
       remEdge: '#d9f0dc',
       deepCenter: '#4f535a',
       deepEdge: '#24272d',
-      thinAxon: [0.30, 0.53, 0.76, 0.48],
+      thinAxon: [0.74, 0.84, 0.92, 0.45],
       dendrite: [0.27, 0.49, 0.72, 0.66],
       knowledge: '#203f7d',
       somaLight: '#a9c9ea',
       somaDark: '#294b8b',
       nucleusLight: '#f2f8fd',
       nucleusDark: '#8eaedf',
+      // Uncrystallized Schwann cells: a few shades darker than the awake
+      // background edge, so unlearned axons sit almost on the background.
+      // Deep sleep mixes toward the night value.
+      schwann: [0.71, 0.82, 0.91, 0.95],
+      // One crystallized Schwann cell: purple body, lighter center.
+      schwannBody: '#7b1fa2',
+      schwannHighlight: '#a75bc9',
       counter: '#1d6fe3',
       counterCore: '#e5f0ff',
       // Homed thoughts: orange while temporary or traveling, light green once settled.
@@ -202,13 +304,14 @@
       // background darkens, so axons, somas, rings, and counters stay
       // legible on dark gray without turning pure white.
       night: {
-        thinAxon: [0.62, 0.74, 0.88, 0.5],
+        thinAxon: [0.38, 0.42, 0.49, 0.5],
         dendrite: [0.6, 0.72, 0.86, 0.62],
         knowledge: '#8fb4ec',
         somaLight: '#5a6c88',
         somaDark: '#a8c6f2',
         nucleusLight: '#7f90a8',
         nucleusDark: '#e1ebf8',
+        schwann: [0.38, 0.42, 0.5, 0.85],
         counter: '#5c9cff',
         anchorRing: '#9ad7a0'
       },
