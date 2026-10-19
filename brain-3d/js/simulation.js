@@ -77,10 +77,10 @@
     // cell farther from the neuron and walks around again.
     const schwannCount = config.schwann.cellsPerAxon;
     const saturationCfg = cfg.saturation;
+    const spinCfg = config.spin;
+    const receptivityCfg = cfg.receptivity;
     const schwannTotal = edges.length * schwannCount;
-    const maxInternals = cfg.external.sizes.reduce(function (max, band) {
-      return Math.max(max, band.internals);
-    }, 1);
+    const maxInternals = cfg.internal.maxCount;
     const saturatedSchwann = edges.map(function () {
       return new Array(schwannCount).fill(false);
     });
@@ -179,36 +179,6 @@
       return order;
     }
 
-    function ageFromSaturation(value) {
-      if (value <= 0) return 0;
-      const ratio = clamp(value / saturationCfg.ceiling, 0, 0.999999);
-      const progress = -Math.log(1 - ratio) / saturationCfg.ageRate;
-      return clamp(
-        saturationCfg.ageAtTarget *
-          Math.pow(progress, 1 / saturationCfg.agePower),
-        0,
-        saturationCfg.maxAge
-      );
-    }
-
-    function sensationRate(age) {
-      const rates = saturationCfg.sensationRates;
-      if (age <= rates[0].age) return rates[0].perYear;
-      for (let i = 1; i < rates.length; i++) {
-        if (age > rates[i].age) continue;
-        const a = rates[i - 1];
-        const b = rates[i];
-        const t = (age - a.age) / (b.age - a.age);
-        return a.perYear + (b.perYear - a.perYear) * t;
-      }
-      return rates[rates.length - 1].perYear;
-    }
-
-    function sensationIntervalForAge(age) {
-      const birthRate = saturationCfg.sensationRates[0].perYear;
-      return saturationCfg.birthInterval * birthRate / sensationRate(age);
-    }
-
     function blockSizeForSaturation(value) {
       const room = clamp(
         (saturationCfg.ceiling - value) / saturationCfg.ceiling,
@@ -225,6 +195,33 @@
         selected = saturationCfg.fibonacci[i];
       }
       return selected;
+    }
+
+    function saturationFill() {
+      return clamp(state.saturation / saturationCfg.ceiling, 0, 1);
+    }
+
+    function internalCountForBand(band) {
+      const room = 1 - saturationFill();
+      const multiplier = receptivityCfg.multiplierFloor +
+        receptivityCfg.multiplierRange * Math.pow(room, receptivityCfg.power);
+      let count = Math.round(band.internals * multiplier);
+      let distress = false;
+      const largestBand = cfg.external.sizes[0];
+      if (
+        band === largestBand &&
+        state.saturation >= receptivityCfg.distressSaturation &&
+        rng() < receptivityCfg.distressChance
+      ) {
+        const bursts = receptivityCfg.distressBursts;
+        count += bursts[Math.floor(rng() * bursts.length)];
+        distress = true;
+        state.stats.distressEvents++;
+      }
+      return {
+        count: clamp(count, 1, maxInternals),
+        distress: distress
+      };
     }
 
     const external = {
@@ -247,6 +244,7 @@
       receivedAt: -1,
       startScale: 1,
       internalCount: 0,
+      distress: false,
       serial: 0
     };
 
@@ -308,7 +306,14 @@
       crystallized: 0,
       saturation: 0,
       age: 0,
-      sensationRate: sensationRate(0),
+      rotationTurns: 0,
+      cognitiveLoad: 0,
+      baseRotationDps: spinCfg.minDegreesPerSecond,
+      rotationDps: spinCfg.minDegreesPerSecond,
+      timeMultiplier: 1,
+      yearsPerMinute: spinCfg.minDegreesPerSecond *
+        spinCfg.yearsPerRotation / 360 * 60,
+      lifeComplete: false,
       threshold: config.sleep.anchors[0].u,
       calculatedRemSeconds: 0,
       deepTargetSeconds: 0,
@@ -330,7 +335,8 @@
         accepted: 0,
         saturated: 0,
         saturationEvents: 0,
-        latestBlockSize: 0
+        latestBlockSize: 0,
+        distressEvents: 0
       }
     };
 
@@ -343,8 +349,6 @@
         saturatedSchwann[candidate.edge][candidate.cell] = true;
         state.stats.saturated++;
         state.saturation = state.stats.saturated / schwannTotal;
-        state.age = ageFromSaturation(state.saturation);
-        state.sensationRate = sensationRate(state.age);
         state.stats.latestSaturated = {
           node: nodeId,
           edge: candidate.edge,
@@ -760,13 +764,15 @@
       const distance = shellRadius + cfg.external.approachGap;
       const band = cfg.external.sizes[Math.floor(rng() * cfg.external.sizes.length)];
       const startScale = band.scaleMin + rng() * (band.scaleMax - band.scaleMin);
+      const response = internalCountForBand(band);
       external.active = true;
       external.accepted = false;
       external.state = 'approaching';
       external.age = 0;
       external.ttl = cfg.external.ttl;
       external.startScale = startScale;
-      external.internalCount = band.internals;
+      external.internalCount = response.count;
+      external.distress = response.distress;
       external.scale = startScale;
       external.speed = cfg.external.speed;
       external.route = [];
@@ -1001,6 +1007,52 @@
       return active;
     }
 
+    function cognitiveLoad() {
+      let load = 0;
+      for (let i = 0; i < internals.length; i++) {
+        const item = internals[i];
+        if (!item.active) continue;
+        load += clamp(item.scale / item.startScale, 0, 1);
+      }
+      for (let i = 0; i < homes.length; i++) {
+        if (homes[i].active && homes[i].state === 'migrating') {
+          load += spinCfg.remMigrationWeight;
+        }
+      }
+      return load;
+    }
+
+    function updateLifeClock(dt) {
+      const fill = saturationFill();
+      const base = spinCfg.minDegreesPerSecond +
+        (spinCfg.maxDegreesPerSecond - spinCfg.minDegreesPerSecond) *
+          Math.pow(fill, spinCfg.accelerationPower);
+      const load = cognitiveLoad();
+      const multiplier = Math.max(
+        spinCfg.minTimeMultiplier,
+        1 / (1 + spinCfg.loadCoefficient * load)
+      );
+      const dps = base * multiplier;
+      state.cognitiveLoad = load;
+      state.baseRotationDps = base;
+      state.timeMultiplier = multiplier;
+      state.rotationDps = state.lifeComplete ? 0 : dps;
+      state.yearsPerMinute = state.rotationDps *
+        spinCfg.yearsPerRotation / 360 * 60;
+      if (state.lifeComplete) return;
+      state.age = Math.min(
+        spinCfg.maxAge,
+        state.age + state.rotationDps * dt *
+          spinCfg.yearsPerRotation / 360
+      );
+      state.rotationTurns = state.age / spinCfg.yearsPerRotation;
+      if (state.age >= spinCfg.maxAge) {
+        state.lifeComplete = true;
+        state.rotationDps = 0;
+        state.yearsPerMinute = 0;
+      }
+    }
+
     const sleep = config.sleep;
     const firstAnchor = sleep.anchors[0];
 
@@ -1159,7 +1211,12 @@
 
     function step(dt) {
       state.time += dt;
-      if (!state.asleep && !state.cohortActive && state.time >= state.nextSpawn) spawnCohort();
+      if (
+        !state.lifeComplete &&
+        !state.asleep &&
+        !state.cohortActive &&
+        state.time >= state.nextSpawn
+      ) spawnCohort();
       stepExternal(dt);
       stepInternals(dt);
       resolveCollision();
@@ -1167,13 +1224,11 @@
       if (state.cohortActive && !external.active && activeInternals() === 0) {
         state.cohortActive = false;
         if (!state.asleep) {
-          state.nextSpawn = Math.max(
-            state.time + cfg.spawnDelay,
-            state.lastSpawnAt + sensationIntervalForAge(state.age)
-          );
+          state.nextSpawn = Math.max(state.time, state.lastSpawnAt + cfg.spawnInterval);
         }
       }
       updateSleep(dt);
+      updateLifeClock(dt);
     }
 
     state.step = step;

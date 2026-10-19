@@ -418,7 +418,9 @@
       if (!item.active) return '';
       if (item.state === 'approaching') return ' · sensation approaching';
       if (item.state === 'received') return ' · sensation received';
-      if (item.accepted) return ' · sensation accepted';
+      if (item.accepted) {
+        return item.distress ? ' · distress response' : ' · sensation accepted';
+      }
       return '';
     }
 
@@ -428,7 +430,9 @@
       const pct = total ? 100 * blocked / total : 0;
       const percent = pct < 10 ? pct.toFixed(1) : String(Math.round(pct));
       let detail = stats.temporaryHomes + ' housed · ' + stats.activeThoughts +
-        ' moving · ' + blocked + '/' + total + ' · ' + percent + '% saturated';
+        ' moving · ' + blocked + '/' + total + ' · ' + percent + '% saturated' +
+        ' · load ' + simulation.cognitiveLoad.toFixed(1) +
+        ' · ' + simulation.yearsPerMinute.toFixed(1) + ' years/min';
       if (includePerformance) {
         detail += ' · ' + stats.avgMs.toFixed(2) + ' ms · ' +
           stats.fps.toFixed(0) + ' fps';
@@ -440,11 +444,7 @@
 
     function draw(dt) {
       const t0 = now();
-      const fullRate = config.spin.degreesPerSecond;
-      const minRate = config.spin.minDegreesPerSecond;
-      const spinDps = minRate + (fullRate - minRate) *
-        Math.pow(1 - simulation.saturation, config.spin.slowdownPower);
-      yaw += spinDps * Math.PI / 180 * dt;
+      yaw = simulation.rotationTurns * Math.PI * 2;
       updateMood();
       project();
 

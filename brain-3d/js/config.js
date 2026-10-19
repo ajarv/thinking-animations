@@ -54,9 +54,19 @@
       }
     },
     spin: {
-      degreesPerSecond: 6,
-      minDegreesPerSecond: 0.6,
-      slowdownPower: 1.25
+      // Ten rotations make a 100-year life. Saturation accelerates the
+      // toilet-roll clock; active thoughts temporarily slow it.
+      yearsPerRotation: 10,
+      minDegreesPerSecond: 12,
+      // The high ceiling is approached only near 84% saturation. In the
+      // seeded three-minute life the observed peak is about 54 degrees/s.
+      maxDegreesPerSecond: 340,
+      accelerationPower: 1.35,
+      loadCoefficient: 0.35,
+      minTimeMultiplier: 0.16,
+      remMigrationWeight: 0.5,
+      maxAge: 100,
+      targetLifetimeSeconds: 180
     },
     camera: {
       // Distance from the eye to the origin, in skeleton units.
@@ -128,10 +138,12 @@
     thoughts: {
       fixedStep: 1 / 60,
       spawnDelay: 1.25,
+      spawnInterval: 10,
       collisionScale: 1.35,
       routeEdges: 36,
-      // A fresh thought loses relevance below half its own starting size.
-      halfLife: 0.5,
+      // A fresh thought loses relevance below a quarter of its starting size,
+      // the second halving. A temporary home is exempt.
+      halfLife: 0.25,
       maxHomes: 48,
       external: {
         ttl: 12,
@@ -154,6 +166,7 @@
         shrinkPower: 1.1
       },
       internal: {
+        maxCount: 13,
         // Each internal thought starts near the external sensation's radius,
         // then shrinks at its own rate: a seeded lifetime and curve.
         ttlMin: 4.5,
@@ -166,6 +179,15 @@
         speedMax: 0.72,
         radius: 0.034
       },
+      receptivity: {
+        multiplierFloor: 0.4,
+        multiplierRange: 2.2,
+        power: 1.2,
+        // Rare, very large adult sensations can still trigger a crisis burst.
+        distressSaturation: 0.45,
+        distressChance: 0.2,
+        distressBursts: [3, 5, 8]
+      },
       temporary: {
         scale: 2,
         growDuration: 0.35
@@ -176,22 +198,7 @@
         fibonacci: [1, 2, 3, 5, 8, 13, 21, 34],
         maxBlock: 34,
         ceiling: 0.84,
-        blockPower: 1.15,
-        ageAtTarget: 50,
-        ageRate: 3.044522,
-        agePower: 1.35,
-        maxAge: 100,
-        // Relative sensation frequency, linearly interpolated by age.
-        birthInterval: 10,
-        sensationRates: [
-          { age: 0, perYear: 10.1 },
-          { age: 8, perYear: 7.4 },
-          { age: 16, perYear: 5.1 },
-          { age: 24, perYear: 3.6 },
-          { age: 50, perYear: 3.0 },
-          { age: 70, perYear: 2.3 },
-          { age: 100, perYear: 1.6 }
-        ]
+        blockPower: 1.15
       }
     }
   };

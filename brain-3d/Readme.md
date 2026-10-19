@@ -10,7 +10,7 @@ The first stage builds the skeleton:
 - Each neuron connects to its three nearest neighbors. With 144 neurons that gives 245 axons in one connected network.
 - Every axon is drawn as five pronounced, rounded Schwann-cell segments with small gaps: 1,225 visible cells at the default settings. The cells step sideways in a small seeded zigzag instead of sitting on a straight line. The kink is in the skeleton, so it turns with the brain.
 - Thirteen thought-domain centers are scattered across the surface with the 2D rule: the same seeded shuffle, then the widest separation that still fits all thirteen. They split into families of 5, 4, and 4, with the repeating weights 0.7, 1.5, 1.0, 1.8, 1.2, 0.6, and 1.4. Each center is marked by a green ring. Every other neuron belongs to the nearest center.
-- The skeleton turns at 6 degrees per second (`spin.degreesPerSecond`), one full turn per minute.
+- One complete turn represents ten years of life, so the ten turns from age 0 to 100 take about three minutes. The rotation is deliberately slow in youth and accelerates as the brain fills.
 - Colors match the awake 2D brain: a light blue radial background, pale blue somas with a dark blue edge, small light nuclei at 0.42 of the soma radius, and blue Schwann cells.
 
 ## External and internal thoughts
@@ -25,10 +25,18 @@ One deterministic cohort runs at a time:
 
 1. A large red external sensation appears outside the brain, beyond the outermost neurons, and flies in a straight line toward the brain center.
 2. The first contact with a neuron or axon is **sensation received**. The sensation settles onto that strand and rests there briefly.
-3. Acceptance is assumed for now, so received is followed by **sensation accepted**. Each sensation has its own seeded size. A size in the largest band launches 5 internal thoughts, then 3, 2, or 1 as the bands get smaller. On acceptance the sensation travels a random, non-backtracking path and shrinks. Each internal thought starts at 80–105% of that sensation's size and shrinks at its own seeded rate. A fresh thought loses relevance once it is below half its own starting size. A temporary home is exempt and can still settle.
+3. Acceptance is assumed for now, so received is followed by **sensation accepted**. Each sensation has its own seeded size. Youthful receptivity multiplies the size band's original 5, 3, 2, or 1 internal thoughts: at zero saturation the bands launch about 13, 8, 5, or 3 thoughts, while near the saturation ceiling they launch about 2, 1, 1, or 1. On acceptance the sensation travels a random, non-backtracking path and shrinks. Each internal thought starts at 80–105% of that sensation's size and shrinks at its own seeded rate. A fresh thought loses relevance once it is below a quarter of its own starting size, the second halving. A temporary home is exempt and can still settle.
 4. Internal routes aim toward different future portions of the external route, with seeded timing variation. Encounters are possible without changing the external sensation's random path.
 5. Collision is tested in 3D model space, not in the 2D projection. When a pair overlaps, both are consumed and the nearest neuron becomes a temporary home.
 6. The temporary home stops, turns orange, and grows to twice the regular external-thought radius. Unused internal thoughts finish fading before the next cohort starts.
+
+External sensations are scheduled every ten real seconds while awake. The existing single-cohort pool delays an arrival if the previous cohort has not finished, and sleep shuts arrivals down. Once saturation reaches 45%, a largest-band sensation has a seeded 20% chance to become an extreme-distress response, adding a Fibonacci burst of 3, 5, or 8 internal thoughts up to the 13-thought cap.
+
+## Thought-driven life clock
+
+Age belongs to the simulation rather than being inferred from saturation. One turn is ten years, using `age += rotationDegrees / 36`. With normalized fullness `f = saturation / 0.84`, the toilet-roll base speed is `12 + 328 × f^1.35` degrees per second.
+
+Active thought load slows that base speed by `max(0.16, 1 / (1 + 0.35 × load))`. Each traveling internal thought contributes its remaining relative size; a thought migrating during REM contributes half. Five full-sized thoughts reduce time to about 36% of its unloaded speed, and thirteen reduce it to about 18%. Thus youth runs slowly because sensations trigger many thoughts, later life accelerates as saturation rises and receptivity falls, and a rare adult distress burst visibly slows life again.
 
 ![An orange double-sized temporary home](screenshots/temporary-home.png)
 
@@ -43,7 +51,7 @@ The night uses the 2D duration rule. Five unsettled homes start an 18-hour night
 - As each thought reaches its permanent home, it blocks a Fibonacci-sized group of Schwann cells, which turn honey yellow. At low saturation it can claim 34 cells; the largest allowed group falls through 21, 13, 8, 5, 3, 2, and 1 as saturation grows. Selection proceeds clockwise from the permanent-home neuron and expands through neighboring neurons when the local cells are full.
 - Deep sleep is a calm indigo and lasts exactly the calculated half, even when REM ran longer. The neurons lighten so they stay visible, and no new thoughts or sensations begin.
 - Waking eases from indigo back to morning blue.
-- Saturation is the blocked Schwann cells divided by every Schwann cell. A calibrated biological-age curve maps 80% saturation to age 50 and approaches an 84% ceiling. Sensations arrive most often at age 0; their spacing grows as the displayed age rises. The brain starts at 6° per second and slows toward 0.6° per second as saturation rises.
+- Saturation is the blocked Schwann cells divided by every Schwann cell, with an 84% working ceiling for the speed and receptivity curves. Each permanent thought still claims the saturation-dependent Fibonacci block described above; age advances independently through rotation.
 
 ![Deep sleep after the temporary homes have settled](screenshots/deep.png)
 
@@ -60,7 +68,7 @@ Then open `http://127.0.0.1:8123/`. The Pause button at the bottom right freezes
 
 ## Performance readout
 
-The top left shows the phase and sensation state on the first line. The second line shows housed thoughts, moving thoughts, blocked Schwann cells over the total, the saturation percentage, and the scene-update time. It refreshes every half second.
+The top left shows age, phase, and sensation state on the first line. The second line shows housed thoughts, moving thoughts, blocked Schwann cells, saturation, current cognitive load, represented years per minute, and scene-update time. It refreshes every half second.
 
 Other URL options:
 
@@ -71,16 +79,16 @@ Headless Chrome at 1280 by 800, 144 neurons and 245 axons, measured over 600 fra
 
 | | Average | 95th percentile |
 |---|---|---|
-| Scene update | 0.67 ms | 0.90 ms |
-| Update plus canvas draw | 2.74 ms | 3.50 ms |
+| Scene update | 0.72 ms | 0.90 ms |
+| Update plus canvas draw | 2.92 ms | 3.60 ms |
 
-That remains well under the 16.7 ms budget for 60 frames per second. Axon and neuron colors are repainted only when the sleep mood or the saturated-cell count changes. The benchmark kept the Paper-item count fixed at 1,837.
+That remains well under the 16.7 ms budget for 60 frames per second. Axon and neuron colors are repainted only when the sleep mood or the saturated-cell count changes. The 13-thought pool raises the fixed Paper-item count slightly; the benchmark kept it stable at 1,861.
 
 ## Files
 
 - `index.html` loads Paper.js 0.12.17 and the scripts.
 - `js/config.js` holds the network, brain-shape, domain, thought, camera, color, and timing settings.
 - `js/skeleton.js` builds the brain surface, graph adjacency, shared zigzag edge geometry, and 13 domain centers.
-- `js/simulation.js` runs inbound sensations, size-based internal bursts, graph travel, half-life fading, housing, and clockwise Schwann saturation with pooled state.
+- `js/simulation.js` runs the thought-driven life clock, inbound sensations, saturation-dependent internal bursts, seeded distress events, graph travel, second-half-life fading, housing, and clockwise Schwann saturation with pooled state.
 - `js/renderer.js` creates all Paper items once, then projects and depth-sorts neurons and beads while reusing the shared edge geometry.
 - `js/main.js` advances the simulation at fixed 1/60-second steps and provides bench and deterministic still modes.
