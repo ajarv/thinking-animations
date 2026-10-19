@@ -16,12 +16,25 @@
     };
   }
 
-  // All geometry lives in grid space: one unit is one neuron cell. The
-  // renderer scales grid space to pixels, so the model is viewport-independent.
-  PL.createNetwork = function (config) {
+  // World space uses one unit per lattice step, so a 16×9 lattice is a
+  // 16 by 9 rectangle. The renderer fits that rectangle with a uniform
+  // scale. Pass {cols, rows} or {width, height}; the default matches a
+  // 1440×900 window.
+  PL.createNetwork = function (config, lattice) {
     const U = PL.util;
-    const cols = config.cols;
-    const rows = config.rows;
+    const count = (config.network && config.network.count) || 144;
+    const chosen = lattice && lattice.cols * lattice.rows === count
+      ? lattice
+      : PL.chooseLattice(
+        count,
+        (lattice && lattice.width) || 1440,
+        (lattice && lattice.height) || 900
+      );
+    const cols = chosen.cols;
+    const rows = chosen.rows;
+    const jitterMin = (config.network && config.network.jitterMin) || 0.22;
+    const jitterMax = (config.network && config.network.jitterMax) || 0.30;
+    const minSpacing = (config.network && config.network.minSpacing) || 0.55;
     const random = U.mulberry32(23);
     const neurons = [];
 
@@ -31,8 +44,8 @@
           id: neurons.length,
           col: col,
           row: row,
-          x: col + 0.5 + (random() - 0.5) * 0.36,
-          y: row + 0.5 + (random() - 0.5) * 0.48,
+          x: col + 0.5,
+          y: row + 0.5,
           angle: (random() - 0.5) * 0.42,
           dendriteSeed: random() * Math.PI * 2,
           incoming: [],
@@ -43,6 +56,37 @@
           pending: 0,
           category: -1
         });
+      }
+    }
+
+    // ±22–30% of the lattice step, resampled until neighbors stay apart.
+    // The fallback center is at least 0.70 from any ±0.30 jitter.
+    const margin = 0.18;
+    function nearest(neuron, x, y) {
+      let best = Infinity;
+      for (let i = 0; i < neuron.id; i++) {
+        const other = neurons[i];
+        const dist = Math.hypot(x - other.x, y - other.y);
+        if (dist < best) best = dist;
+      }
+      return best;
+    }
+    for (let i = 0; i < neurons.length; i++) {
+      const neuron = neurons[i];
+      let placed = false;
+      for (let attempt = 0; attempt < 32 && !placed; attempt++) {
+        const amp = jitterMin + random() * (jitterMax - jitterMin);
+        const x = U.clamp(neuron.col + 0.5 + (random() - 0.5) * 2 * amp, margin, cols - margin);
+        const y = U.clamp(neuron.row + 0.5 + (random() - 0.5) * 2 * amp, margin, rows - margin);
+        if (nearest(neuron, x, y) >= minSpacing) {
+          neuron.x = x;
+          neuron.y = y;
+          placed = true;
+        }
+      }
+      if (!placed) {
+        neuron.x = neuron.col + 0.5;
+        neuron.y = neuron.row + 0.5;
       }
     }
 
@@ -79,11 +123,14 @@
 
     const edges = [];
     const keys = {};
+    const schwannPerAxon = config.schwannPerAxon || 5;
 
     function addEdge(from, to) {
       const key = from.id + ':' + to.id;
       if (from === to || keys[key]) return;
       keys[key] = true;
+      const cells = [];
+      for (let i = 0; i < schwannPerAxon; i++) cells.push(0);
       const edge = {
         id: edges.length,
         from: from,
@@ -91,7 +138,13 @@
         bend: (U.hash(from.id, to.id) - 0.5) * 0.72,
         seedAt: -1,
         strength: 0,
-        traversals: 0
+        traversals: 0,
+        // Five Schwann cells along the arc, 0 pale and 1 purple. owner is the
+        // category that claimed the axon, or -1. Cells are filled from the
+        // domain neuron that first reached the axon.
+        cells: cells,
+        purpleCount: 0,
+        owner: -1
       };
       shape(edge);
       edges.push(edge);
@@ -116,10 +169,10 @@
       }
     }
 
-    // 21 category centers, scattered. The same mulberry32(23) stream that
+    // Category centers, scattered. The same mulberry32(23) stream that
     // jittered the neurons continues here, so the scatter is fixed for a life.
-    // Families stay 0–6 danger, 7–13 attraction, 14–20 everyday, but those
-    // indexes are not rows on the screen.
+    // How many is config.categories.count. Family is the index band, not a
+    // region of the screen.
     const inset = 2;
     const pool = [];
     for (let i = 0; i < neurons.length; i++) {
@@ -138,21 +191,22 @@
 
     function farEnough(neuron, chosen, separation) {
       for (let k = 0; k < chosen.length; k++) {
-        const dx = neuron.col - chosen[k].col;
-        const dy = neuron.row - chosen[k].row;
+        const dx = neuron.x - chosen[k].x;
+        const dy = neuron.y - chosen[k].y;
         if (dx * dx + dy * dy < separation * separation) return false;
       }
       return true;
     }
 
+    const anchorCount = config.categories.count;
     let separation = 3;
     let anchors = [];
-    while (anchors.length < 21 && separation >= 0) {
+    while (anchors.length < anchorCount && separation >= 0) {
       anchors = [];
-      for (let i = 0; i < pool.length && anchors.length < 21; i++) {
+      for (let i = 0; i < pool.length && anchors.length < anchorCount; i++) {
         if (farEnough(pool[i], anchors, separation)) anchors.push(pool[i]);
       }
-      if (anchors.length < 21) separation -= 0.5;
+      if (anchors.length < anchorCount) separation -= 0.5;
     }
     for (let i = 0; i < anchors.length; i++) anchors[i].category = i;
 
@@ -170,6 +224,8 @@
     return {
       cols: cols,
       rows: rows,
+      worldWidth: cols,
+      worldHeight: rows,
       neurons: neurons,
       edges: edges,
       anchors: anchors,

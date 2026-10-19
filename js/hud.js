@@ -162,14 +162,14 @@
       if (phase === 'rem' || phase === 'deep') {
         needFill.style.width = ((1 - snap.reorganized) * 100) + '%';
         clusterInfo.textContent = snap.settled + ' settled · ' + snap.wandering + ' traveling · ' +
-          snap.temporary + ' waiting · ' + snap.clusters + '/21 clusters';
+          snap.temporary + ' waiting · ' + snap.clusters + '/' + config.categories.count + ' clusters';
       } else if (phase === 'waking') {
         needFill.style.width = ((1 - snap.phaseBlend) * 100) + '%';
         clusterInfo.textContent = snap.settled + ' settled · waking';
       } else {
         needFill.style.width = (snap.need * 100) + '%';
-        clusterInfo.textContent = snap.temporary + '/' + snap.sleepThreshold +
-          ' temporarily homed · ' + snap.settled + ' settled';
+        clusterInfo.textContent = snap.unsettled + '/' + snap.sleepThreshold +
+          ' unsettled · ' + snap.crystallized + ' crystallized';
       }
 
       if (waveNote) {

@@ -2,17 +2,68 @@
   'use strict';
   const PL = root.PaperLife = root.PaperLife || {};
 
+  // Split `count` homes across the three families. Earlier bands take the
+  // remainder, so 13 is 5 danger, 4 attraction, 4 everyday. Weights cycle
+  // the seven-value pattern when a family is not exactly that long.
+  function categoryLayout(count, families, pattern) {
+    const base = Math.floor(count / families);
+    const extra = count % families;
+    const familySizes = [];
+    const weights = [];
+    for (let band = 0; band < families; band++) {
+      const size = base + (band < extra ? 1 : 0);
+      familySizes.push(size);
+      for (let i = 0; i < size; i++) weights.push(pattern[i % pattern.length]);
+    }
+    return {
+      count: count,
+      families: families,
+      familySizes: familySizes,
+      weightPattern: pattern.slice(),
+      weights: weights
+    };
+  }
+
+  // Exact factor pairs of `count`. The pair whose cols/rows is closest to
+  // the viewport's width/height wins, so a wide window is not a stretched
+  // square. Both orientations are candidates (16×9 and 9×16).
+  PL.chooseLattice = function (count, width, height) {
+    const aspect = width / Math.max(height, 0.001);
+    let best = null;
+    let bestScore = Infinity;
+    for (let cols = 1; cols <= count; cols++) {
+      if (count % cols !== 0) continue;
+      const rows = count / cols;
+      const latticeAspect = cols / rows;
+      const score = Math.abs(Math.log(latticeAspect / aspect));
+      const squarer = best && Math.abs(cols - rows) < Math.abs(best.cols - best.rows);
+      if (score < bestScore - 1e-12 || (Math.abs(score - bestScore) <= 1e-12 && squarer)) {
+        bestScore = score;
+        best = { cols: cols, rows: rows, aspect: latticeAspect };
+      }
+    }
+    return best;
+  };
+
   PL.config = {
-    // 29 x 13 = 377 neurons, the first Fibonacci number above 300.
-    cols: 29,
-    rows: 13,
+    // 144 neurons. The cols × rows lattice is chosen from the viewport
+    // aspect when the page loads; a resize only refits the scale.
+    network: {
+      count: 144,
+      // Jitter amplitude, as a fraction of the one-unit lattice spacing.
+      jitterMin: 0.22,
+      jitterMax: 0.30,
+      // Nearest neurons stay at least this far apart, in lattice units.
+      minSpacing: 0.55
+    },
 
     pools: {
       thoughts: 144,
-      // Acceptance bursts are 7 and home ticks are at most 3. Measured peak
-      // over 400s and two nights is 362 live, with zero drops. 610 is the
-      // next Fibonacci size with room for another burst at that peak.
+      // Acceptance bursts are 7 and home ticks are at most 3. The first night
+      // on 16×9 drops none.
       counters: 610,
+      // Crystal slots, not neurons. The sleep threshold is a share of this
+      // pool, so it stays at 377 to keep the first night about 18s in.
       crystals: 377
     },
 
@@ -41,6 +92,9 @@
 
     spawnRate: 11,
     centerMin: 0.07,
+    // Each axon is five Schwann cells of equal arc length. One permanent
+    // housing turns exactly one eligible cell purple.
+    schwannPerAxon: 5,
     // Temporary and traveling thoughts are drawn at twice the size of the
     // thought that arrived. A permanent home shrinks back to 1×.
     crystalScale: 2,
@@ -80,26 +134,20 @@
       rejectMax: 0.55
     },
 
-    // 21 permanent homes in three families of seven. cols and rows count
-    // the families, not a screen grid: the anchors are scattered. The same
-    // seven weights repeat in each family, about 0.6 to 1.8, so the biggest
-    // category holds about three times the smallest.
-    categories: {
-      cols: 7,
-      rows: 3,
-      weights: [
-        0.7, 1.5, 1.0, 1.8, 1.2, 0.6, 1.4,
-        0.7, 1.5, 1.0, 1.8, 1.2, 0.6, 1.4,
-        0.7, 1.5, 1.0, 1.8, 1.2, 0.6, 1.4
-      ]
-    },
+    // Permanent homes. `count` is the only size: anchors, weights, domains,
+    // and the cluster readout all follow it. Families are not a screen grid.
+    // The pattern runs about 0.6 to 1.8 and repeats inside a family when
+    // that family is longer than the pattern, or stops early when shorter.
+    categories: categoryLayout(13, 3, [0.7, 1.5, 1.0, 1.8, 1.2, 0.6, 1.4]),
 
     sleep: {
-      // Sleep starts once this share of the crystal pool (377) is temporarily
-      // homed, scaled by the life stage's threshold factor. The night then
-      // lasts awakeDuration × sleep/awake for that age: half REM, half deep.
+      // One simulated second per this many hours of the sleep-duration
+      // function. 18 hours is 36 seconds: 18 REM and 18 deep.
+      secondsPerHour: 2,
+      // Kept so older notes still parse. Onset is unsettled vs crystallized,
+      // not this share of the crystal pool, and there is no minimum afternoon.
       needThreshold: 0.38,
-      minAwake: 8,
+      minAwake: 0,
       // needPhase is where "needs sleep" begins; the red blend is the need
       // itself and is full at 1. wakeBlend is how long waking eases from
       // deep dark gray back to light blue. tossFade is how long a tossed thought fades.
@@ -193,17 +241,20 @@
       remEdge: '#d9f0dc',
       deepCenter: '#4f535a',
       deepEdge: '#24272d',
-      thinAxon: [0.30, 0.53, 0.76, 0.48],
+      thinAxon: [0.74, 0.84, 0.92, 0.45],
       dendrite: [0.27, 0.49, 0.72, 0.66],
       knowledge: '#203f7d',
       somaLight: '#a9c9ea',
       somaDark: '#294b8b',
       nucleusLight: '#f2f8fd',
       nucleusDark: '#8eaedf',
-      // Consolidated knowledge: a neuron moves toward these as its strength
-      // rises during sleep. Axons stay thin.
-      crystalSoma: '#6a1b9a',
-      crystalNucleus: '#ce93d8',
+      // Uncrystallized Schwann cells: a few shades darker than the awake
+      // background edge, so unlearned axons sit almost on the background.
+      // Deep sleep mixes toward the night value.
+      schwann: [0.71, 0.82, 0.91, 0.95],
+      // One crystallized Schwann cell: purple body, lighter center.
+      schwannBody: '#7b1fa2',
+      schwannHighlight: '#a75bc9',
       counter: '#1d6fe3',
       counterCore: '#e5f0ff',
       // Homed thoughts: orange while temporary or traveling, light green once settled.
@@ -217,13 +268,14 @@
       // background darkens, so axons, somas, rings, and counters stay
       // legible on dark gray without turning pure white.
       night: {
-        thinAxon: [0.62, 0.74, 0.88, 0.5],
+        thinAxon: [0.38, 0.42, 0.49, 0.5],
         dendrite: [0.6, 0.72, 0.86, 0.62],
         knowledge: '#8fb4ec',
         somaLight: '#5a6c88',
         somaDark: '#a8c6f2',
         nucleusLight: '#7f90a8',
         nucleusDark: '#e1ebf8',
+        schwann: [0.38, 0.42, 0.5, 0.85],
         counter: '#5c9cff',
         anchorRing: '#9ad7a0'
       },
