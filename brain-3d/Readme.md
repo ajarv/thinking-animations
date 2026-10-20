@@ -26,7 +26,7 @@ One deterministic cohort runs at a time:
 1. A large red external sensation appears outside the brain, beyond the outermost neurons, and flies in a straight line toward the brain center.
 2. The first contact with a neuron or axon is **sensation received**. The sensation settles onto that strand and rests there briefly.
 3. Acceptance is assumed for now, so received is followed by **sensation accepted**. Each sensation has its own seeded size. Youthful receptivity multiplies the size band's original 5, 3, 2, or 1 internal thoughts: at zero saturation the bands launch about 13, 8, 5, or 3 thoughts, while near the saturation ceiling they launch about 2, 1, 1, or 1. On acceptance the sensation travels a random, non-backtracking path and shrinks. Each internal thought starts at 80–105% of that sensation's size and shrinks at its own seeded rate. A fresh thought loses relevance once it is below a quarter of its own starting size, the second halving. A temporary home is exempt and can still settle.
-4. Internal routes aim toward different future portions of the external route, with seeded timing variation. Encounters are possible without changing the external sensation's random path.
+4. Each internal thought leaves its domain center perpendicular to the surface and flies straight through the inside of the brain. It reflects off the opposite wall and keeps bouncing until it fades or meets the sensation. The sensation keeps its own random path on the mesh.
 5. Collision is tested in 3D model space, not in the 2D projection. When a pair overlaps, both are consumed and the nearest neuron becomes a temporary home.
 6. The temporary home stops, turns orange, and grows to twice the regular external-thought radius. Unused internal thoughts finish fading before the next cohort starts.
 
@@ -54,7 +54,7 @@ Schwann cells crystallize only in REM, so saturation rises in steps, one per nig
 
 ## Sleep cycle
 
-Sleep starts as soon as three thoughts are temporarily housed (`sleep.onsetHomes`). The night length uses the 2D duration rule: up to five unsettled homes give an 18-hour night; more unsettled homes shorten it along the 8-hour, 13-hour, and 4-hour anchors, and crystallized homes can only shorten it further. Each simulated hour lasts half a second, so an 18-hour night takes 9 seconds.
+The animation opens with 10 seconds of deep sleep before the first sensation. After that, sleep starts as soon as three thoughts are temporarily housed (`sleep.onsetHomes`). The night length uses the 2D duration rule: up to five unsettled homes give an 18-hour night; more unsettled homes shorten it along the 8-hour, 13-hour, and 4-hour anchors, and crystallized homes can only shorten it further. Each simulated hour lasts half a second, so an 18-hour night takes 9 seconds.
 
 - Fresh awake is a soft morning blue. Sensations are dusty rose, internal thoughts are periwinkle, and temporary homes are apricot.
 - Overloaded warms the room toward peach as temporary homes approach the sleep threshold.

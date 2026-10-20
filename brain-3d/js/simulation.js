@@ -261,6 +261,8 @@
         route: [],
         routeIndex: 0,
         progress: 0,
+        direction: { x: 0, y: -1, z: 0 },
+        flightLeft: 0,
         position: { x: 0, y: 0, z: 0 },
         sourceCategory: -1,
         targetNode: -1,
@@ -293,11 +295,11 @@
       cohortActive: false,
       nextSpawn: cfg.spawnDelay,
       lastSpawnAt: -Infinity,
-      phase: 'awake',
+      phase: 'deep',
       phaseBlend: 0,
-      asleep: false,
+      asleep: true,
       inStage1: false,
-      inDeep: false,
+      inDeep: true,
       sleeps: 0,
       stateTime: 0,
       lastWakeAt: -1,
@@ -313,7 +315,8 @@
       lifeComplete: false,
       threshold: config.sleep.onsetHomes,
       calculatedRemSeconds: 0,
-      deepTargetSeconds: 0,
+      deepStartedAt: 0,
+      deepTargetSeconds: config.sleep.openingDeep,
       external: external,
       internals: internals,
       homes: homes,
@@ -496,28 +499,103 @@
       return startScale * cfg.halfLife;
     }
 
-    function spawnInternal(item, category, targetStep, cohortSerial) {
-      const anchor = anchors[category];
-      const targetSegment = external.route[Math.min(targetStep, external.route.length - 1)];
-      const targetNode = targetSegment.to;
-      const route = shortestRoute(anchor.id, targetNode);
-      const externalDistance = Math.max(
-        0.15,
-        routeLength(external.route, edges, targetStep) -
-          external.progress * edges[external.route[0].edge].length
-      );
-      const halfAt = external.ttl * (1 - Math.pow(cfg.halfLife, 1 / cfg.external.shrinkPower));
-      const relevantFor = Math.max(0.45, halfAt - external.age);
-      const arrival = Math.min(externalDistance / cfg.external.speed, relevantFor);
-      const internalDistance = routeLength(route, edges);
-      const variation = 0.92 + rng() * 0.16;
-      const desiredSpeed = internalDistance / Math.max(0.5, arrival) * variation;
-      const continuation = randomRoute(targetNode, 18, route.length ? route[route.length - 1].from : -1);
+    function unitFromCenter(x, y, z) {
+      let nx = x - center.x;
+      let ny = y - center.y;
+      let nz = z - center.z;
+      const length = Math.hypot(nx, ny, nz) || 1;
+      return { x: nx / length, y: ny / length, z: nz / length };
+    }
 
-      item.route = route.concat(continuation);
+    // The far shell along a ray. The largest hit is the opposite wall, so a
+    // thought leaving its own neuron does not bounce off a neighbor.
+    function farWall(ox, oy, oz, dx, dy, dz) {
+      const radius = cfg.external.contactRadius;
+      const minT = 0.2;
+      const maxT = shellRadius * 3;
+      let best = 0;
+      function consider(t) {
+        if (t == null || t <= minT || t >= maxT || t <= best) return;
+        best = t;
+      }
+      for (let i = 0; i < neurons.length; i++) {
+        const neuron = neurons[i];
+        consider(raySphereT(ox, oy, oz, dx, dy, dz, neuron.x, neuron.y, neuron.z, radius));
+      }
+      for (let i = 0; i < meshSegments.length; i++) {
+        const segment = meshSegments[i];
+        consider(rayCylinderT(
+          ox, oy, oz, dx, dy, dz,
+          segment.ax, segment.ay, segment.az,
+          segment.bx, segment.by, segment.bz,
+          radius
+        ));
+      }
+      if (!best) return null;
+      return {
+        t: best,
+        x: ox + dx * best,
+        y: oy + dy * best,
+        z: oz + dz * best
+      };
+    }
+
+    function aimThrough(item) {
+      const hit = farWall(
+        item.position.x, item.position.y, item.position.z,
+        item.direction.x, item.direction.y, item.direction.z
+      );
+      if (!hit) {
+        item.direction.x *= -1;
+        item.direction.y *= -1;
+        item.direction.z *= -1;
+        item.flightLeft = shellRadius;
+        return;
+      }
+      item.flightLeft = hit.t;
+    }
+
+    function bounceInternal(item) {
+      const normal = unitFromCenter(item.position.x, item.position.y, item.position.z);
+      const dot = item.direction.x * normal.x +
+        item.direction.y * normal.y +
+        item.direction.z * normal.z;
+      item.direction.x -= 2 * dot * normal.x;
+      item.direction.y -= 2 * dot * normal.y;
+      item.direction.z -= 2 * dot * normal.z;
+      const length = Math.hypot(item.direction.x, item.direction.y, item.direction.z) || 1;
+      item.direction.x /= length;
+      item.direction.y /= length;
+      item.direction.z /= length;
+      item.position.x += item.direction.x * 0.05;
+      item.position.y += item.direction.y * 0.05;
+      item.position.z += item.direction.z * 0.05;
+      aimThrough(item);
+    }
+
+    function advanceFlight(item, dt) {
+      let remaining = item.speed * dt;
+      let guard = 0;
+      while (remaining > 0.000001 && item.active && guard < 6) {
+        if (item.flightLeft <= 0.000001) aimThrough(item);
+        const step = Math.min(remaining, Math.max(item.flightLeft, 0));
+        item.position.x += item.direction.x * step;
+        item.position.y += item.direction.y * step;
+        item.position.z += item.direction.z * step;
+        item.flightLeft -= step;
+        remaining -= step;
+        if (item.flightLeft <= 0.000001) bounceInternal(item);
+        guard++;
+      }
+    }
+
+    function spawnInternal(item, category, cohortSerial) {
+      const anchor = anchors[category];
+      const inward = unitFromCenter(anchor.x, anchor.y, anchor.z);
+      item.route = [];
       item.routeIndex = 0;
       item.progress = 0;
-      item.active = item.route.length > 0;
+      item.active = true;
       item.age = 0;
       const internalCfg = cfg.internal;
       const externalRadius = cfg.external.radius * external.scale;
@@ -528,13 +606,21 @@
         rng() * (internalCfg.shrinkPowerMax - internalCfg.shrinkPowerMin);
       item.startScale = externalRadius * match / internalCfg.radius;
       item.scale = item.startScale;
-      item.speed = clamp(desiredSpeed, cfg.internal.speedMin, cfg.internal.speedMax);
+      item.speed = internalCfg.speedMin +
+        rng() * (internalCfg.speedMax - internalCfg.speedMin);
       item.sourceCategory = category;
-      item.targetNode = targetNode;
+      item.targetNode = anchor.id;
       item.serial = cohortSerial;
       item.stage1Sleep = state.inStage1 ? state.sleeps : -1;
+      item.direction.x = -inward.x;
+      item.direction.y = -inward.y;
+      item.direction.z = -inward.z;
+      item.flightLeft = 0;
       setAtNode(item, anchor.id);
-      if (item.active) placeOnRoute(item);
+      item.position.x += item.direction.x * 0.05;
+      item.position.y += item.direction.y * 0.05;
+      item.position.z += item.direction.z * 0.05;
+      aimThrough(item);
     }
 
     function raySphereT(ox, oy, oz, dx, dy, dz, cx, cy, cz, radius) {
@@ -738,14 +824,12 @@
       const count = external.internalCount;
       const sources = pickCenters(count);
       state.stats.latestSources = sources.slice();
-      const routeLast = Math.max(1, external.route.length - 1);
       for (let i = 0; i < internals.length; i++) {
         if (i >= count) {
           internals[i].active = false;
           continue;
         }
-        const target = Math.min(routeLast, 4 + i * 4 + Math.floor(rng() * 3));
-        spawnInternal(internals[i], sources[i], target, external.serial);
+        spawnInternal(internals[i], sources[i], external.serial);
       }
     }
 
@@ -855,7 +939,7 @@
           state.stats.internalFaded++;
           continue;
         }
-        advanceRoute(item, dt);
+        advanceFlight(item, dt);
         if (!item.active) state.stats.internalFaded++;
       }
     }

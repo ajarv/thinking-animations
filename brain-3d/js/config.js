@@ -118,6 +118,8 @@
       secondsPerHour: 0.5,
       // Sleep starts once this many thoughts are temporarily housed.
       onsetHomes: 3,
+      // The animation opens already in deep sleep, before the first sensation.
+      openingDeep: 10,
       needPhase: 0.2,
       wakeBlend: 1.8,
       migrationSpeed: 1.02,
