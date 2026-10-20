@@ -269,9 +269,19 @@
       const target = moodTarget();
       mood.center = mixColor(mood.center, target.center, paintK);
       mood.edge = mixColor(mood.edge, target.edge, paintK);
+      const luma = function (color) {
+        return color.red * 0.299 + color.green * 0.587 + color.blue * 0.114;
+      };
+      const darker = luma(mood.center) <= luma(mood.edge) ? mood.center : mood.edge;
+      const surround = darker === mood.center ? mood.edge : mood.center;
+      const core = new paper.Color(
+        darker.red * 0.72,
+        darker.green * 0.72,
+        darker.blue * 0.72
+      );
       background.fillColor = {
         gradient: {
-          stops: [hexColor(mood.center), hexColor(mood.edge)],
+          stops: [hexColor(core), hexColor(surround)],
           radial: true
         },
         origin: paper.view.center,
@@ -300,7 +310,7 @@
         }
       }
       readout.fillColor = mixColor(dayText, nightText, mood.dark);
-      document.body.style.background = hexColor(mood.center);
+      document.body.style.background = hexColor(surround);
     }
 
     function layout() {
