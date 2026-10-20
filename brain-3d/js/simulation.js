@@ -646,6 +646,10 @@
       item.scale = 1;
       item.speed = lo + rng() * (hi - lo);
       item.spark = Math.floor(rng() * colorsLength());
+      const tintAngle = rng() * Math.PI * 2;
+      const tintDist = 0.35 + rng() * 0.65;
+      item.glintX = Math.cos(tintAngle) * tintDist;
+      item.glintY = Math.sin(tintAngle) * tintDist;
       item.calm = false;
       item.fadeWindow = 0;
       item.direction.x = burst.x;

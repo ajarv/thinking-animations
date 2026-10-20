@@ -89,7 +89,7 @@
       somaEdge: '#6d8aab',
       nucleus: '#f8fbfe',
       schwann: '#ffffff',
-      saturatedSchwann: '#9bbfd4',
+      saturatedSchwann: '#bd45f5',
       anchorRing: '#6a9a78',
       external: '#d98986',
       externalCore: '#fff7f5',
@@ -97,9 +97,9 @@
       internalCore: '#fff1b8',
       sparks: ['#f6c445', '#f0a03a', '#e07a3d'],
       sparkCores: ['#fff1b8', '#ffe0a3', '#ffd0a8'],
-      // Daytime answers to a sensation. Deep blue, rimmed in white and gray.
-      daySparks: ['#16325c', '#1a4578', '#0f2748'],
-      daySparkSurrounds: ['#ffffff', '#d0d6de', '#e7ebf0'],
+      // Daytime answers to a sensation. Blue border, interior white, orange, or yellow.
+      daySparkBorder: '#3d9eea',
+      daySparks: ['#ffffff', '#f0a03a', '#f6c445'],
       temporary: '#e0a56a',
       temporaryCore: '#fff7ee',
       settled: '#8fb89a',

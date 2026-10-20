@@ -111,19 +111,21 @@
     }
 
     const externalView = createBead(colors.external, colors.externalCore, 1.75);
-    function sparkView() {
-      const view = createBead(colors.internal, colors.internalCore, 2.8, true);
+    function sparkView(haloScale) {
+      const view = createBead(colors.internal, colors.internalCore, haloScale, true);
       view.shiny = true;
       view.spark = -1;
       return view;
     }
 
     const internalViews = simulation.internals.map(function () {
-      const view = sparkView();
+      const view = sparkView(1.42);
       view.daySpark = true;
       return view;
     });
-    const fireworkViews = simulation.fireworks.map(sparkView);
+    const fireworkViews = simulation.fireworks.map(function () {
+      return sparkView(2.8);
+    });
     const homeViews = simulation.homes.map(function () {
       const view = createBead(colors.temporary, colors.temporaryCore, 1.45);
       view.isHome = true;
@@ -395,19 +397,32 @@
         const glint = view.group.children[2];
         if (view.daySpark) {
           const fill = colors.daySparks[tint] || colors.daySparks[0];
-          const surround = colors.daySparkSurrounds[tint] || colors.daySparkSurrounds[0];
+          const border = colors.daySparkBorder;
           halo.blendMode = 'normal';
-          halo.opacity = 0.9;
-          halo.fillColor = surround;
+          halo.opacity = 1;
+          halo.fillColor = border;
           bead.fillColor = fill;
-          bead.strokeColor = surround;
-          if (glint) glint.fillColor = '#ffffff';
+          bead.strokeColor = border;
+          bead.strokeWidth = 1.35;
+          if (glint) glint.fillColor = fill;
         } else {
           const fill = colors.sparks[tint] || colors.internal;
           const core = colors.sparkCores[tint] || colors.internalCore;
           halo.fillColor = fill;
           bead.fillColor = fill;
           bead.strokeColor = core;
+        }
+      }
+      if (view.daySpark && item.active) {
+        const ox = (item.glintX || 0) * BASE * 0.28;
+        const oy = (item.glintY || 0) * BASE * 0.28;
+        const bead = view.group.children[1];
+        const glint = view.group.children[2];
+        bead.position.x = ox;
+        bead.position.y = oy;
+        if (glint) {
+          glint.position.x = ox;
+          glint.position.y = oy;
         }
       }
       if (view.isHome) {
@@ -438,7 +453,7 @@
         if (placeBead(
           internalViews[i],
           simulation.internals[i],
-          thoughtCfg.internal.radius,
+          thoughtCfg.internal.radius * 1.4,
           0
         )) active++;
       }
