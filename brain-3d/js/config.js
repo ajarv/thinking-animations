@@ -88,13 +88,15 @@
       soma: '#c5d8ec',
       somaEdge: '#6d8aab',
       nucleus: '#f8fbfe',
-      schwann: '#9bbfd4',
-      saturatedSchwann: '#e4bc55',
+      schwann: '#ffffff',
+      saturatedSchwann: '#9bbfd4',
       anchorRing: '#6a9a78',
       external: '#d98986',
       externalCore: '#fff7f5',
-      internal: '#7aa0d4',
-      internalCore: '#f3f7fc',
+      internal: '#f6c445',
+      internalCore: '#fff1b8',
+      sparks: ['#f6c445', '#f0a03a', '#e07a3d'],
+      sparkCores: ['#fff1b8', '#ffe0a3', '#ffd0a8'],
       temporary: '#e0a56a',
       temporaryCore: '#fff7ee',
       settled: '#8fb89a',
@@ -103,14 +105,14 @@
       needEdge: '#f0d9cc',
       stage1Center: '#f7f4fb',
       stage1Edge: '#e4dced',
-      remCenter: '#f3f8f5',
-      remEdge: '#d7ebe0',
+      remCenter: '#1c1814',
+      remEdge: '#100e0c',
       deepCenter: '#445068',
       deepEdge: '#2e384c',
       nightSoma: '#dce6f3',
       nightSomaEdge: '#b9cbe2',
-      nightSchwann: '#c9d6e8',
-      nightSaturatedSchwann: '#f0d48a',
+      nightSchwann: '#ffffff',
+      nightSaturatedSchwann: '#9bbfd4',
       nightText: '#e7eef6',
       text: '#3e5878'
     },
@@ -122,7 +124,7 @@
       openingDeep: 10,
       needPhase: 0.2,
       wakeBlend: 1.8,
-      migrationSpeed: 1.02,
+      migrationSpeed: 0.26,
       // Hours of sleep from the unsettled count. The curve is flat outside
       // the anchors and log-linear between them.
       anchors: [
@@ -169,30 +171,33 @@
         receiveHold: 0.65,
         // Larger bands launch more internal thoughts. Ranges do not overlap.
         sizes: [
-          { scaleMin: 4.4, scaleMax: 5.4, internals: 5 },
-          { scaleMin: 3.3, scaleMax: 4.1, internals: 3 },
-          { scaleMin: 2.4, scaleMax: 3.1, internals: 2 },
-          { scaleMin: 1.6, scaleMax: 2.2, internals: 1 }
+          { scaleMin: 4.4, scaleMax: 5.4, internals: 12 },
+          { scaleMin: 3.3, scaleMax: 4.1, internals: 9 },
+          { scaleMin: 2.4, scaleMax: 3.1, internals: 6 },
+          { scaleMin: 1.6, scaleMax: 2.2, internals: 4 }
         ],
         shrinkPower: 1.1
       },
       internal: {
-        maxCount: 13,
-        // Each internal thought starts near the external sensation's radius,
-        // then shrinks at its own rate: a seeded lifetime and curve.
+        maxCount: 32,
+        // Small sparks of a fixed size. They expire by age, not by shrinking.
         ttlMin: 4.5,
         ttlMax: 12,
-        startMatchMin: 0.8,
-        startMatchMax: 1.05,
-        shrinkPowerMin: 0.7,
-        shrinkPowerMax: 1.8,
-        speedMin: 0.22,
-        speedMax: 0.72,
-        radius: 0.034
+        speedMin: 0.7,
+        speedMax: 1.35,
+        radius: 0.012,
+        // Seconds after the burst before a spark can house the sensation.
+        arming: 0.45,
+        // Each knowledge center throws this many awake-style sparks per wave.
+        remBurst: 8,
+        remPool: 160,
+        remWaveInterval: 0.75,
+        // After every temporary home has settled, the sparks fade this long.
+        remFade: 1.4
       },
       receptivity: {
-        multiplierFloor: 0.4,
-        multiplierRange: 2.2,
+        multiplierFloor: 1.2,
+        multiplierRange: 1.4,
         power: 1.2,
         // Rare, very large adult sensations can still trigger a crisis burst.
         distressSaturation: 0.45,

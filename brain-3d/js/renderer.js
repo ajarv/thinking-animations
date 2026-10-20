@@ -75,22 +75,31 @@
       return group;
     });
 
-    function createBead(fill, core, haloScale) {
+    function createBead(fill, core, haloScale, shiny) {
       const halo = new Path.Circle({
         center: [0, 0],
         radius: BASE * haloScale,
         fillColor: fill,
-        opacity: 0.14
+        opacity: shiny ? 0.72 : 0.14,
+        blendMode: shiny ? 'screen' : 'normal'
       });
       const bead = new Path.Circle({
         center: [0, 0],
         radius: BASE,
         fillColor: fill,
         strokeColor: core,
-        strokeWidth: 1.5,
+        strokeWidth: shiny ? 2.4 : 1.5,
         strokeScaling: false
       });
-      const group = new paper.Group({ children: [halo, bead], applyMatrix: false });
+      const children = [halo, bead];
+      if (shiny) {
+        children.push(new Path.Circle({
+          center: [0, 0],
+          radius: BASE * 0.38,
+          fillColor: '#fff6d8'
+        }));
+      }
+      const group = new paper.Group({ children: children, applyMatrix: false });
       group.pivot = new Point(0, 0);
       group.visible = false;
       objectLayer.addChild(group);
@@ -102,9 +111,15 @@
     }
 
     const externalView = createBead(colors.external, colors.externalCore, 1.75);
-    const internalViews = simulation.internals.map(function () {
-      return createBead(colors.internal, colors.internalCore, 1.55);
-    });
+    function sparkView() {
+      const view = createBead(colors.internal, colors.internalCore, 2.8, true);
+      view.shiny = true;
+      view.spark = -1;
+      return view;
+    }
+
+    const internalViews = simulation.internals.map(sparkView);
+    const fireworkViews = simulation.fireworks.map(sparkView);
     const homeViews = simulation.homes.map(function () {
       const view = createBead(colors.temporary, colors.temporaryCore, 1.45);
       view.isHome = true;
@@ -132,6 +147,7 @@
     }
     addBeadRecord(externalView);
     internalViews.forEach(addBeadRecord);
+    fireworkViews.forEach(addBeadRecord);
     homeViews.forEach(addBeadRecord);
     const byDepth = function (a, b) {
       if (a.active !== b.active) return a.active ? 1 : -1;
@@ -357,6 +373,15 @@
       matrix.ty = p.y;
       view.group.matrix = matrix;
       view.group.opacity = fadeAt > 0 ? Math.min(1, item.scale / fadeAt) : 1;
+      if (view.shiny && view.spark !== item.spark) {
+        const tint = item.spark || 0;
+        const fill = colors.sparks[tint] || colors.internal;
+        const core = colors.sparkCores[tint] || colors.internalCore;
+        view.spark = tint;
+        view.group.children[0].fillColor = fill;
+        view.group.children[1].fillColor = fill;
+        view.group.children[1].strokeColor = core;
+      }
       if (view.isHome) {
         const settled = item.state === 'settled';
         const kind = settled ? 'settled' : 'temporary';
@@ -386,8 +411,21 @@
           internalViews[i],
           simulation.internals[i],
           thoughtCfg.internal.radius,
-          0.25
+          0
         )) active++;
+      }
+      for (let i = 0; i < fireworkViews.length; i++) {
+        const item = simulation.fireworks[i];
+        const view = fireworkViews[i];
+        if (placeBead(view, item, thoughtCfg.internal.radius, 0)) {
+          if (item.calm) {
+            view.group.opacity = Math.max(
+              0,
+              (item.ttl - item.age) / Math.max(item.fadeWindow || 1, 0.001)
+            );
+          }
+          active++;
+        }
       }
       let homes = 0;
       for (let i = 0; i < homeViews.length; i++) {

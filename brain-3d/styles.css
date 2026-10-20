@@ -200,10 +200,10 @@ body {
 }
 
 .swatch.sensation { background: #d98986; }
-.swatch.thought { background: #7aa0d4; }
+.swatch.thought { background: #f6c445; box-shadow: 0 0 0 1px #f0a03a inset; }
 .swatch.home { background: #e0a56a; }
 .swatch.settled { background: #8fb89a; }
-.swatch.crystal { background: #e4bc55; }
+.swatch.crystal { background: #9bbfd4; }
 
 @media (prefers-reduced-motion: reduce) {
   #hud, #kFill { transition: none; animation: none; }

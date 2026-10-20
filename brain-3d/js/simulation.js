@@ -248,9 +248,8 @@
       serial: 0
     };
 
-    const internals = [];
-    for (let i = 0; i < maxInternals; i++) {
-      internals.push({
+    function makeSpark() {
+      return {
         active: false,
         age: 0,
         ttl: cfg.internal.ttlMax,
@@ -263,12 +262,18 @@
         progress: 0,
         direction: { x: 0, y: -1, z: 0 },
         flightLeft: 0,
+        spark: 0,
         position: { x: 0, y: 0, z: 0 },
         sourceCategory: -1,
         targetNode: -1,
         serial: 0
-      });
+      };
     }
+
+    const internals = [];
+    for (let i = 0; i < maxInternals; i++) internals.push(makeSpark());
+    const fireworks = [];
+    for (let i = 0; i < cfg.internal.remPool; i++) fireworks.push(makeSpark());
 
     const homes = [];
     for (let i = 0; i < cfg.maxHomes; i++) {
@@ -319,6 +324,10 @@
       deepTargetSeconds: config.sleep.openingDeep,
       external: external,
       internals: internals,
+      fireworks: fireworks,
+      remNextBurst: Infinity,
+      remWaves: 0,
+      remCalming: false,
       homes: homes,
       saturatedSchwann: saturatedSchwann,
       schwannTotal: schwannTotal,
@@ -486,13 +495,16 @@
 
     function pickCenters(count) {
       const order = anchors.map(function (_, index) { return index; });
-      for (let i = 0; i < count; i++) {
+      const limit = Math.min(count, order.length);
+      for (let i = 0; i < limit; i++) {
         const j = i + Math.floor(rng() * (order.length - i));
         const swap = order[i];
         order[i] = order[j];
         order[j] = swap;
       }
-      return order.slice(0, count);
+      const sources = [];
+      for (let i = 0; i < count; i++) sources.push(order[i % order.length]);
+      return sources;
     }
 
     function halfLifeScale(startScale) {
@@ -589,38 +601,80 @@
       }
     }
 
-    function spawnInternal(item, category, cohortSerial) {
-      const anchor = anchors[category];
-      const inward = unitFromCenter(anchor.x, anchor.y, anchor.z);
+    function fireworkDirection(origin) {
+      const outward = unitFromCenter(origin.x, origin.y, origin.z);
+      let rx = 0;
+      let ry = 1;
+      let rz = 0;
+      if (Math.abs(outward.y) > 0.85) {
+        rx = 1;
+        ry = 0;
+      }
+      const dot = rx * outward.x + ry * outward.y + rz * outward.z;
+      let ux = rx - outward.x * dot;
+      let uy = ry - outward.y * dot;
+      let uz = rz - outward.z * dot;
+      const ul = Math.hypot(ux, uy, uz) || 1;
+      ux /= ul;
+      uy /= ul;
+      uz /= ul;
+      const vx = outward.y * uz - outward.z * uy;
+      const vy = outward.z * ux - outward.x * uz;
+      const vz = outward.x * uy - outward.y * ux;
+      const spread = 0.25 + rng() * 0.95;
+      const angle = rng() * Math.PI * 2;
+      let dx = -outward.x + (ux * Math.cos(angle) + vx * Math.sin(angle)) * spread;
+      let dy = -outward.y + (uy * Math.cos(angle) + vy * Math.sin(angle)) * spread;
+      let dz = -outward.z + (uz * Math.cos(angle) + vz * Math.sin(angle)) * spread;
+      const length = Math.hypot(dx, dy, dz) || 1;
+      return { x: dx / length, y: dy / length, z: dz / length };
+    }
+
+    function igniteSpark(item, origin, ttl, direction, speedMin, speedMax) {
+      const burst = direction || fireworkDirection(origin);
+      const internalCfg = cfg.internal;
+      const lo = speedMin == null ? internalCfg.speedMin : speedMin;
+      const hi = speedMax == null ? internalCfg.speedMax : speedMax;
       item.route = [];
       item.routeIndex = 0;
       item.progress = 0;
       item.active = true;
       item.age = 0;
+      item.ttl = ttl;
+      item.shrinkPower = 1;
+      item.startScale = 1;
+      item.scale = 1;
+      item.speed = lo + rng() * (hi - lo);
+      item.spark = Math.floor(rng() * colorsLength());
+      item.calm = false;
+      item.fadeWindow = 0;
+      item.direction.x = burst.x;
+      item.direction.y = burst.y;
+      item.direction.z = burst.z;
+      item.flightLeft = 0;
+      item.bloom = 0;
+      item.traveled = 0;
+      const gap = direction ? 0.04 : 0.12;
+      item.position.x = origin.x + burst.x * gap;
+      item.position.y = origin.y + burst.y * gap;
+      item.position.z = origin.z + burst.z * gap;
+      if (direction) item.bloom = 0.16 + rng() * 0.34;
+      else aimThrough(item);
+    }
+
+    function colorsLength() {
+      return 3;
+    }
+
+    function spawnInternal(item, category, cohortSerial) {
       const internalCfg = cfg.internal;
-      const externalRadius = cfg.external.radius * external.scale;
-      const match = internalCfg.startMatchMin +
-        rng() * (internalCfg.startMatchMax - internalCfg.startMatchMin);
-      item.ttl = internalCfg.ttlMin + rng() * (internalCfg.ttlMax - internalCfg.ttlMin);
-      item.shrinkPower = internalCfg.shrinkPowerMin +
-        rng() * (internalCfg.shrinkPowerMax - internalCfg.shrinkPowerMin);
-      item.startScale = externalRadius * match / internalCfg.radius;
-      item.scale = item.startScale;
-      item.speed = internalCfg.speedMin +
-        rng() * (internalCfg.speedMax - internalCfg.speedMin);
+      const ttl = internalCfg.ttlMin + rng() * (internalCfg.ttlMax - internalCfg.ttlMin);
+      const origin = anchors[category];
+      igniteSpark(item, origin, ttl);
       item.sourceCategory = category;
-      item.targetNode = anchor.id;
+      item.targetNode = origin.id;
       item.serial = cohortSerial;
       item.stage1Sleep = state.inStage1 ? state.sleeps : -1;
-      item.direction.x = -inward.x;
-      item.direction.y = -inward.y;
-      item.direction.z = -inward.z;
-      item.flightLeft = 0;
-      setAtNode(item, anchor.id);
-      item.position.x += item.direction.x * 0.05;
-      item.position.y += item.direction.y * 0.05;
-      item.position.z += item.direction.z * 0.05;
-      aimThrough(item);
     }
 
     function raySphereT(ox, oy, oz, dx, dy, dz, cx, cy, cz, radius) {
@@ -933,8 +987,8 @@
         const item = internals[i];
         if (!item.active) continue;
         item.age += dt;
-        item.scale = fadeScale(item.age, item.ttl, item.startScale, item.shrinkPower);
-        if (item.scale < halfLifeScale(item.startScale) || item.age >= item.ttl) {
+        item.scale = item.startScale;
+        if (item.age >= item.ttl) {
           item.active = false;
           state.stats.internalFaded++;
           continue;
@@ -942,6 +996,41 @@
         advanceFlight(item, dt);
         if (!item.active) state.stats.internalFaded++;
       }
+    }
+
+    function stepFireworks(dt) {
+      for (let i = 0; i < fireworks.length; i++) {
+        const item = fireworks[i];
+        if (!item.active) continue;
+        item.age += dt;
+        item.scale = 1;
+        if (item.age >= item.ttl) {
+          item.active = false;
+          continue;
+        }
+        advanceFlight(item, dt);
+      }
+    }
+
+    function activeFireworks() {
+      let count = 0;
+      for (let i = 0; i < fireworks.length; i++) {
+        if (fireworks[i].active) count++;
+      }
+      return count;
+    }
+
+    function burstFromHome(origin) {
+      const internalCfg = cfg.internal;
+      let launched = 0;
+      for (let i = 0; i < fireworks.length && launched < internalCfg.remBurst; i++) {
+        if (fireworks[i].active) continue;
+        const ttl = internalCfg.ttlMin +
+          rng() * (internalCfg.ttlMax - internalCfg.ttlMin);
+        igniteSpark(fireworks[i], origin, ttl);
+        launched++;
+      }
+      return launched;
     }
 
     function nearestNeuron(point) {
@@ -996,6 +1085,7 @@
       for (let i = 0; i < internals.length; i++) {
         const item = internals[i];
         if (!item.active || item.serial !== external.serial) continue;
+        if (item.age < cfg.internal.arming) continue;
         const internalRadius = cfg.internal.radius * item.scale;
         const limit = (externalRadius + internalRadius) * cfg.collisionScale;
         const dx = external.position.x - item.position.x;
@@ -1179,20 +1269,52 @@
       return count;
     }
 
-    function beginRem() {
-      state.inStage1 = false;
-      state.remStartedAt = state.time;
+    function burstAllCenters() {
+      for (let i = 0; i < anchors.length; i++) burstFromHome(anchors[i]);
+      state.remWaves++;
+    }
+
+    function releaseRemHomes() {
       for (let i = 0; i < homes.length; i++) {
         const home = homes[i];
-        if (!home.active || home.state === 'settled') continue;
-        const target = anchors[neurons[home.node].domain];
-        home.route = shortestRoute(home.node, target.id);
+        if (!home.active || home.state !== 'temporary') continue;
+        const start = Math.floor(rng() * anchors.length);
+        let route = [];
+        let target = anchors[start];
+        for (let n = 0; n < anchors.length; n++) {
+          target = anchors[(start + n) % anchors.length];
+          route = shortestRoute(home.node, target.id);
+          if (route.length) break;
+        }
+        home.route = route;
         home.routeIndex = 0;
         home.progress = 0;
         home.speed = sleep.migrationSpeed;
-        if (!home.route.length) settleHome(home, target.id);
+        if (!route.length) settleHome(home, target.id);
         else home.state = 'migrating';
       }
+    }
+
+    function calmFireworks() {
+      if (state.remCalming) return;
+      state.remCalming = true;
+      const fade = cfg.internal.remFade;
+      for (let i = 0; i < fireworks.length; i++) {
+        const item = fireworks[i];
+        if (!item.active) continue;
+        item.calm = true;
+        item.fadeWindow = fade;
+        item.ttl = item.age + fade;
+      }
+    }
+
+    function beginRem() {
+      state.inStage1 = false;
+      state.remStartedAt = state.time;
+      state.remNextBurst = state.time;
+      state.remWaves = 0;
+      state.remCalming = false;
+      releaseRemHomes();
     }
 
     function fallAsleep() {
@@ -1253,7 +1375,15 @@
       const remOpen = countHomes(function (home) {
         return home.state === 'temporary' || home.state === 'migrating';
       });
-      if (elapsed + 1e-8 < state.calculatedRemSeconds || remOpen > 0) {
+      if (remOpen > 0 && state.time + 1e-8 >= state.remNextBurst) {
+        burstAllCenters();
+        state.remNextBurst = state.time + cfg.internal.remWaveInterval;
+      } else if (remOpen === 0) calmFireworks();
+      if (
+        elapsed + 1e-8 < state.calculatedRemSeconds ||
+        remOpen > 0 ||
+        activeFireworks() > 0
+      ) {
         setPhase('rem', remOpen > 0 ? 0.45 : 1);
         return;
       }
@@ -1273,6 +1403,7 @@
       ) spawnCohort();
       stepExternal(dt);
       stepInternals(dt);
+      stepFireworks(dt);
       resolveCollision();
       stepHomes(dt);
       if (state.cohortActive && !external.active && activeInternals() === 0) {
