@@ -118,7 +118,11 @@
       return view;
     }
 
-    const internalViews = simulation.internals.map(sparkView);
+    const internalViews = simulation.internals.map(function () {
+      const view = sparkView();
+      view.daySpark = true;
+      return view;
+    });
     const fireworkViews = simulation.fireworks.map(sparkView);
     const homeViews = simulation.homes.map(function () {
       const view = createBead(colors.temporary, colors.temporaryCore, 1.45);
@@ -385,12 +389,26 @@
       view.group.opacity = fadeAt > 0 ? Math.min(1, item.scale / fadeAt) : 1;
       if (view.shiny && view.spark !== item.spark) {
         const tint = item.spark || 0;
-        const fill = colors.sparks[tint] || colors.internal;
-        const core = colors.sparkCores[tint] || colors.internalCore;
         view.spark = tint;
-        view.group.children[0].fillColor = fill;
-        view.group.children[1].fillColor = fill;
-        view.group.children[1].strokeColor = core;
+        const halo = view.group.children[0];
+        const bead = view.group.children[1];
+        const glint = view.group.children[2];
+        if (view.daySpark) {
+          const fill = colors.daySparks[tint] || colors.daySparks[0];
+          const surround = colors.daySparkSurrounds[tint] || colors.daySparkSurrounds[0];
+          halo.blendMode = 'normal';
+          halo.opacity = 0.9;
+          halo.fillColor = surround;
+          bead.fillColor = fill;
+          bead.strokeColor = surround;
+          if (glint) glint.fillColor = '#ffffff';
+        } else {
+          const fill = colors.sparks[tint] || colors.internal;
+          const core = colors.sparkCores[tint] || colors.internalCore;
+          halo.fillColor = fill;
+          bead.fillColor = fill;
+          bead.strokeColor = core;
+        }
       }
       if (view.isHome) {
         const settled = item.state === 'settled';
