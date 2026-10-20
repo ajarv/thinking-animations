@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paper Life — Brain 3D v1</title>
+<link rel="stylesheet" href="styles.css?v=hud1">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/paper.js/0.12.17/paper-full.min.js"></script>
+</head>
+<body>
+<canvas id="stage" resize></canvas>
+<button type="button" id="showControls" aria-label="Show controls" aria-controls="hud" aria-expanded="true">Show controls</button>
+<div id="hud">
+  <div class="hud-head">
+    <button type="button" id="hideControls" aria-label="Hide controls" aria-controls="hud" aria-expanded="true">Hide</button>
+  </div>
+  <div class="row">
+    <span class="label">Knowledge saturation</span>
+    <span class="val" id="kVal">0%</span>
+  </div>
+  <div class="bar"><div class="fill" id="kFill"></div></div>
+  <div class="row">
+    <span class="label">Age</span>
+    <span class="val" id="aVal">0 yrs</span>
+  </div>
+  <div class="bar" id="aBar"><div class="fill" id="aFill"></div></div>
+  <div id="stageName">Early childhood</div>
+  <div class="row">
+    <span class="label">Sleep need</span>
+    <span class="val small" id="stateVal">Fresh awake</span>
+  </div>
+  <div class="bar thin"><div class="fill" id="needFill"></div></div>
+  <div id="clusterInfo"></div>
+  <div class="legend">
+    <span><i class="swatch sensation"></i>Sensation</span>
+    <span><i class="swatch thought"></i>Thought</span>
+    <span><i class="swatch home"></i>Homed</span>
+    <span><i class="swatch settled"></i>Settled</span>
+    <span><i class="swatch crystal"></i>Crystallized</span>
+  </div>
+</div>
+<script src="js/config.js?v=hud1"></script>
+<script src="js/skeleton.js?v=hud1"></script>
+<script src="js/simulation.js?v=hud1"></script>
+<script src="js/renderer.js?v=hud1"></script>
+<script src="js/hud.js?v=hud1"></script>
+<script src="js/main.js?v=hud1"></script>
+</body>
+</html>
