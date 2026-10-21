@@ -37,20 +37,19 @@
       jitter: 0.08
     },
     shape: {
-      rx: 1.35,
-      ry: 0.92,
-      rz: 1.05,
+      // Final scale. The egg radii below are already in brain units.
+      rx: 1,
+      ry: 1,
+      rz: 1,
       brain: {
-        // Separate the upper hemispheres and cut a shallow sagittal groove.
-        hemisphereSplit: 0.055,
-        grooveDepth: 0.11,
-        grooveWidth: 0.2,
-        // Round the front, taper the rear, and form the lower temporal lobes.
-        frontalBulge: 0.11,
-        posteriorTaper: 0.13,
-        temporalBulge: 0.13,
-        underside: -0.58,
-        undersideCompression: 0.32
+        // Two eggs side by side. Centers are this fraction of one egg's
+        // width apart, so each egg keeps about three quarters of its width.
+        fuse: 0.75,
+        ax: 0.82,
+        ay: 0.8,
+        az: 1.18,
+        // Rear of each egg narrows a little; the front stays blunt.
+        point: 0.16
       }
     },
     ageBands: [

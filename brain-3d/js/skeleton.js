@@ -19,31 +19,29 @@
     return dx * dx + dy * dy + dz * dz;
   }
 
-  function warpBrain(x, y, z, brain) {
-    const top = Math.max(0, y);
-    const medial = Math.exp(-Math.pow(x / brain.grooveWidth, 2));
-    const side = x < 0 ? -1 : 1;
+  // One point on an egg. `side` is -1 or 1. The two eggs share a long
+  // axis and their centers sit `fuse` egg-widths apart, so they overlap.
+  function eggPoint(i, count, side, brain, jitter, rng) {
+    const last = Math.max(1, count - 1);
+    const y = count === 1 ? 0 : 1 - (i / last) * 2;
+    const ring = Math.sqrt(Math.max(0, 1 - y * y));
+    const theta = Math.PI * (3 - Math.sqrt(5)) * i;
+    let x = Math.cos(theta) * ring + (rng() - 0.5) * jitter;
+    let yy = y + (rng() - 0.5) * jitter;
+    let z = Math.sin(theta) * ring + (rng() - 0.5) * jitter;
+    const len = Math.hypot(x, yy, z) || 1;
+    x /= len;
+    yy /= len;
+    z /= len;
 
-    // Two upper lobes with a visible longitudinal fissure.
-    x += side * brain.hemisphereSplit * top * medial;
-    y -= brain.grooveDepth * Math.pow(top, 1.5) * medial;
-
-    const front = Math.max(0, z);
+    // Blunt at the front, a little narrower at the rear.
     const rear = Math.max(0, -z);
-    const temporal = Math.exp(-Math.pow((y + 0.32) / 0.3, 2)) *
-      (0.55 + 0.45 * (1 - Math.min(1, Math.abs(z))));
-
-    // Human-brain silhouette: broad frontal and temporal regions, narrower rear.
-    x *= 1 + brain.frontalBulge * front -
-      brain.posteriorTaper * rear + brain.temporalBulge * temporal;
-    z *= 1 + brain.frontalBulge * 0.45 * front -
-      brain.posteriorTaper * 0.35 * rear;
-
-    // Compress the bottom into a flatter base without a hard edge.
-    if (y < brain.underside) {
-      y = brain.underside + (y - brain.underside) * brain.undersideCompression;
-    }
-    return { x: x, y: y, z: z };
+    const taper = 1 - brain.point * rear * rear;
+    return {
+      x: side * brain.fuse * brain.ax + x * brain.ax * taper,
+      y: yy * brain.ay * taper,
+      z: z * brain.az
+    };
   }
 
   // Seeded Fibonacci points warped into a stylized brain surface.
@@ -52,20 +50,14 @@
     const shape = config.shape;
     const jitter = config.network.jitter;
     const rng = mulberry32(config.seed);
-    const golden = Math.PI * (3 - Math.sqrt(5));
-    const last = Math.max(1, count - 1);
     const neurons = [];
+    const perSide = Math.floor(count / 2);
 
     for (let i = 0; i < count; i++) {
-      const y = count === 1 ? 0 : 1 - (i / last) * 2;
-      const ring = Math.sqrt(Math.max(0, 1 - y * y));
-      const theta = golden * i;
-      const point = warpBrain(
-        Math.cos(theta) * ring + (rng() - 0.5) * jitter,
-        y + (rng() - 0.5) * jitter,
-        Math.sin(theta) * ring + (rng() - 0.5) * jitter,
-        shape.brain
-      );
+      const side = i < perSide ? -1 : 1;
+      const index = side < 0 ? i : i - perSide;
+      const onSide = side < 0 ? perSide : count - perSide;
+      const point = eggPoint(index, onSide, side, shape.brain, jitter, rng);
       neurons.push({
         id: i,
         x: point.x * shape.rx,

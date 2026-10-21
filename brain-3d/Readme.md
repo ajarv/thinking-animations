@@ -6,9 +6,9 @@ A Paper.js drawing of a stylized brain skeleton. Paper.js only draws in 2D, so e
 
 The first stage builds the skeleton:
 
-- 144 neurons form a brain-like surface with two upper hemispheres, a shallow sagittal groove, a fuller frontal region, temporal bulges, a tapered rear, and a flattened underside. Change `network.count` in `js/config.js`. The layout is seeded, so the same count always gives the same shape.
-- Each neuron connects to its three nearest neighbors. With 144 neurons that gives 245 axons in one connected network.
-- Every axon is drawn as five pronounced, rounded Schwann-cell segments with small gaps: 1,225 visible cells at the default settings. The cells step sideways in a small seeded zigzag instead of sitting on a straight line. The kink is in the skeleton, so it turns with the brain.
+- 144 neurons form two eggs fused along their long axis. The egg centers are three-quarters of an egg-width apart, so the front and back show two lobes with a dip between them. Each egg is blunt at the front and a little narrower at the rear. Change `network.count` in `js/config.js`. The layout is seeded, so the same count always gives the same shape.
+- Each neuron connects to its three nearest neighbors. With 144 neurons that gives 249 axons in one connected network.
+- Every axon is drawn as five pronounced, rounded Schwann-cell segments with small gaps: 1,245 visible cells at the default settings. The cells step sideways in a small seeded zigzag instead of sitting on a straight line. The kink is in the skeleton, so it turns with the brain.
 - Thirteen thought-domain centers are scattered across the surface with the 2D rule: the same seeded shuffle, then the widest separation that still fits all thirteen. They split into families of 5, 4, and 4, with the repeating weights 0.7, 1.5, 1.0, 1.8, 1.2, 0.6, and 1.4. Each center is marked by a green ring. Every other neuron belongs to the nearest center.
 - One complete turn represents ten years of life, so the ten turns from age 0 to 100 take about six and a half minutes. The rotation is deliberately slow in youth and accelerates as the brain fills.
 - Colors match the awake 2D brain: a light blue radial background, pale blue somas with a dark blue edge, small light nuclei at 0.42 of the soma radius, and blue Schwann cells.
